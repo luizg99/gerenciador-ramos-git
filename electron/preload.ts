@@ -20,6 +20,7 @@ const api: Api = {
   commitFileDiff: (id, hash, file) => call('git:commitFileDiff', id, hash, file) as ReturnType<Api['commitFileDiff']>,
   workingDiff: (id, file, staged) => call('git:workingDiff', id, file, staged) as Promise<string>,
   stage: (id, files, unstage) => call('git:stage', id, files, unstage) as Promise<void>,
+  cancelOperation: id => call('git:cancelOperation', id) as Promise<void>,
   discard: (id, files) => call('git:discard', id, files) as Promise<void>,
   createBranch: (id, name, base, mode, publish, install) => call('git:createBranch', id, name, base, mode, publish, install) as ReturnType<Api['createBranch']>,
   createBranches: (id, items, switchTo, mode, publish, install) => call('git:createBranches', id, items, switchTo, mode, publish, install) as ReturnType<Api['createBranches']>,

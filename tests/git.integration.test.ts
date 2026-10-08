@@ -57,6 +57,12 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await expect(service.switchBranch(f.repo, 'main', 'stash')).rejects.toThrow('operação Git em andamento');
     expect(await git(f.repo, 'branch', '--show-current')).toBe('dev'); await git(f.repo, 'cherry-pick', '--abort');
   });
+  it('cancela um cherry-pick externo preso e libera o repositório', async () => {
+    const f = await fixture(); const service = new GitService(undefined, async () => {});
+    await git(f.repo, 'switch', 'dev'); const before = await git(f.repo, 'rev-parse', 'HEAD'); await change(f.repo, 'shared.txt', 'conflito', 'Conflito'); const head = await git(f.repo, 'rev-parse', 'HEAD');
+    await expect(git(f.repo, 'cherry-pick', f.second)).rejects.toThrow(); expect(await service.operation(f.repo)).not.toBeNull();
+    await service.cancelOperation(f.repo); expect(await service.operation(f.repo)).toBeNull(); expect(await git(f.repo, 'rev-parse', 'HEAD')).toBe(head); expect(before).not.toBe(head);
+  });
   it('scanner deduplica raízes, reconhece worktrees e ignora node_modules', async () => {
     const f = await fixture(); await git(f.repo, 'worktree', 'add', path.join(f.root, 'linked'), 'main');
     const ignored = path.join(f.root, 'node_modules', 'ignored'); await mkdir(ignored, { recursive: true }); await git(ignored, 'init');

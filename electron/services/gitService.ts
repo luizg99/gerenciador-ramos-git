@@ -17,6 +17,18 @@ export class GitService {
     const existing = await Promise.all(markers.map(name => access(path.join(directory, name)).then(() => name).catch(() => null)));
     return existing.find(Boolean) ?? null;
   }
+  async cancelOperation(repo: string) {
+    const operation = await this.operation(repo);
+    if (!operation) return;
+    const command = operation === 'CHERRY_PICK_HEAD' || operation === 'sequencer' ? ['cherry-pick'] : operation === 'MERGE_HEAD' ? ['merge'] : operation === 'REVERT_HEAD' ? ['revert'] : operation.startsWith('rebase') ? ['rebase'] : null;
+    if (!command) { await this.git(repo, ['bisect', 'reset']); return; }
+    try { await this.git(repo, [...command, '--abort']); }
+    catch (error) {
+      // Stuck states (e.g. an empty cherry-pick) can make --abort fail; --quit drops the state and keeps HEAD/worktree as they are.
+      if (command[0] !== 'cherry-pick' && command[0] !== 'revert') throw error;
+      await this.git(repo, [...command, '--quit']);
+    }
+  }
   async changes(repo: string): Promise<FileChange[]> {
     const raw = await this.git(repo, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
     const tokens = raw.split('\0'); const files: FileChange[] = [];

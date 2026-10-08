@@ -312,6 +312,7 @@ export class AppController {
     await this.api.discard(this.id, files);
     this.set({ notice: files.length === 1 ? 'Alterações descartadas.' : `Alterações de ${files.length} arquivos descartadas.`, ...(files.includes(this.state.workingFile) ? { workingFile: '', workingDiff: '' } : {}) });
   }, true, 'Descartando alterações…');
+  cancelOperation = () => this.action(async () => { await this.api.cancelOperation(this.id); this.set({ notice: 'Operação Git cancelada.' }); }, true, 'Cancelando operação…');
   showWorkingDiff = (file: string, staged: boolean) => this.action(async () => { this.set({ workingDiff: await this.api.workingDiff(this.id, file, staged), workingFile: file, workingStaged: staged }); });
   commit = () => this.action(async () => { await this.stageQueue; await this.api.commit(this.id, this.state.commitMessage); this.set({ commitMessage: '', workingDiff: '', workingFile: '', notice: 'Commit criado. Use Enviar commits para fazer o push.' }); }, true);
   push = () => this.action(async () => { await this.stageQueue; await this.api.push(this.id); this.set({ notice: 'Push concluído.' }); }, true);

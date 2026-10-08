@@ -100,7 +100,7 @@ it('compila o aplicativo e executa seleção → cherry-pick → push na interfa
       };
     });
     await page.getByRole('button', { name: 'Criar pull request', exact: true }).click();
-    await page.getByLabel('Issue Jira').fill('https://jiraproducao.totvs.com.br/browse/DDVENDAS-61611');
+    await page.getByRole('textbox', { name: 'Issue Jira opcional', exact: true }).fill('https://jiraproducao.totvs.com.br/browse/DDVENDAS-61611');
     await page.getByLabel('PR dinâmico').check();
     await page.getByLabel('Origem (1)', { exact: true }).fill(f.source);
     await page.getByLabel('Destino (1)', { exact: true }).fill('main');
@@ -111,15 +111,15 @@ it('compila o aplicativo e executa seleção → cherry-pick → push na interfa
     await page.getByRole('button', { name: 'Buscar PRs e gerar mensagem', exact: true }).click();
     await expectUI(page.getByText(/PR ainda não encontrado:/)).toBeVisible();
     await expectUI(page.getByRole('button', { name: 'Copiar mensagem', exact: true })).toHaveCount(0);
-    await page.getByLabel('Issue Jira').fill('   ');
+    await page.getByRole('textbox', { name: 'Issue Jira opcional', exact: true }).fill('   ');
     await page.getByRole('button', { name: 'Criar 3 pull requests no Azure', exact: true }).click();
     const missingIssue = page.getByRole('dialog', { name: 'Issue Jira não informada', exact: true });
     await expectUI(missingIssue).toBeVisible();
     expect(await app.evaluate(() => (globalThis as any).testCreatedPrs.length)).toBe(0);
     await missingIssue.getByRole('button', { name: 'Voltar e preencher' }).click();
     await expectUI(missingIssue).not.toBeVisible();
-    await expectUI(page.getByLabel('Issue Jira')).toBeFocused();
-    await page.getByLabel('Issue Jira').fill('DDVENDAS-61611');
+    await expectUI(page.getByRole('textbox', { name: 'Issue Jira opcional', exact: true })).toBeFocused();
+    await page.getByRole('textbox', { name: 'Issue Jira opcional', exact: true }).fill('DDVENDAS-61611');
     await page.getByRole('button', { name: 'Criar 3 pull requests no Azure', exact: true }).click();
     await expectUI(page.getByLabel('Prévia da mensagem')).toContainText('DDVENDAS-61611');
     const createdPrs = await app.evaluate(() => (globalThis as any).testCreatedPrs);
