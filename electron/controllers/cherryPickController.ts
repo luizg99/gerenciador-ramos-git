@@ -26,7 +26,7 @@ export class CherryPickController {
   async start(repo: string, input: CherryPlan): Promise<Execution> {
     const plan = planSchema.parse(input);
     const initial = await this.git.ensureIdle(repo);
-    if (this.executions.some(e => e.repoPath === repo && !e.finished)) throw new Error('Existe uma sequência pendente neste repositório. Retome ou conclua manualmente antes de iniciar outra.');
+    if (this.executions.some(e => e.repoPath === repo && !e.finished)) throw new Error('Existe uma sequência pendente neste repositório. Retome ou cancele a sequência antes de iniciar outra.');
     await this.git.branches(repo, true);
     const origin = await this.git.resolveBranch(repo, plan.source);
     const resolved = await Promise.all(plan.targets.map(t => this.git.resolveBranch(repo, t)));
@@ -94,6 +94,17 @@ export class CherryPickController {
       await this.git.checkout(execution.repoPath, execution.initialBranch);
       this.report(execution.repoPath, `Voltou para o ramo ${execution.initialBranch}.`);
     } catch (error) { this.report(execution.repoPath, `Sequência concluída, mas não foi possível voltar para ${execution.initialBranch}: ${(error as Error).message}`); }
+  }
+  async cancel(repo: string, id: string): Promise<Execution> {
+    const index = this.executions.findIndex(e => e.id === id && e.repoPath === repo && !e.finished);
+    if (index < 0) throw new Error('Sequência pendente não encontrada.');
+    // Cancels the saved workflow only; never discards manual work or rewrites Git history.
+    const execution = { ...this.executions[index], finished: true, cancelledAt: new Date().toISOString() };
+    const executions = this.executions.map((item, i) => i === index ? execution : item);
+    await this.storage.saveExecutions(executions);
+    this.executions = executions;
+    this.report(repo, 'Sequência cancelada. Os commits e arquivos do repositório foram preservados.');
+    return structuredClone(execution);
   }
   async resume(repo: string, id: string, action: 'retry' | 'manual'): Promise<Execution> {
     const execution = this.executions.find(e => e.id === id && e.repoPath === repo && !e.finished);

@@ -1,3 +1,4 @@
+import type { ReviewInput, ReviewMessage } from './reviewMessage';
 export type SwitchMode = 'block' | 'carry' | 'stash';
 export interface Repository { id: string; path: string; name: string }
 export interface FileChange { path: string; originalPath?: string; index: string; worktree: string }
@@ -12,7 +13,7 @@ export interface TargetRun {
   branch: string; phase: Phase; failedAt?: Phase; beforeHead?: string; appliedHead?: string;
   remote?: string; remoteBranch?: string; error?: string; aborted?: boolean;
 }
-export interface Execution { id: string; repoPath: string; source: string; commits: string[]; targets: TargetRun[]; startedAt: string; finished: boolean; initialBranch?: string }
+export interface Execution { id: string; repoPath: string; source: string; commits: string[]; targets: TargetRun[]; startedAt: string; finished: boolean; cancelledAt?: string; initialBranch?: string }
 export interface Progress { repoPath: string; message: string; time: string }
 export interface Snapshot { settings: Settings; repositories: Repository[]; executions: Execution[]; scanning?: boolean }
 export interface SwitchResult { branch: string; stash?: string }
@@ -38,11 +39,17 @@ export interface Api {
   createBranch(id: string, name: string, base: string, mode: SwitchMode, publish: boolean, install: boolean): Promise<SwitchResult & { published: boolean }>;
   createBranches(id: string, items: { name: string; base: string }[], switchTo: number | null, mode: SwitchMode, publish: boolean, install: boolean): Promise<BatchResult>;
   pullRequestInfo(id: string): Promise<PullRequestInfo>;
-  openPullRequest(id: string, source: string, target: string): Promise<string>;
-  openPullRequests(id: string, pairs: { source: string; target: string }[]): Promise<string[]>;
+  reviewHistory(): Promise<ReviewMessage[]>;
+  createPullRequests(id: string, pairs: { source: string; target: string }[], issue: string): Promise<{ prs: { source: string; target: string; url: string; created: boolean }[]; error?: string; message?: ReviewMessage }>;
+  updateReviewIssue(messageId: string, issue: string): Promise<ReviewMessage>;
+  openReviewLink(url: string): Promise<void>;
+  findPullRequests(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; url: string }[]>;
+  saveReviewMessage(id: string, input: ReviewInput): Promise<ReviewMessage>;
+  copyReviewMessage(messageId: string): Promise<void>;
   commit(id: string, message: string): Promise<void>;
   push(id: string): Promise<void>;
   cherryPick(id: string, plan: CherryPlan): Promise<Execution>;
+  cancelCherryPick(id: string, executionId: string): Promise<Execution>;
   resume(id: string, executionId: string, action: 'retry' | 'manual'): Promise<Execution>;
   onProgress(callback: (progress: Progress) => void): () => void;
   onSnapshot(callback: (snapshot: Snapshot) => void): () => void;

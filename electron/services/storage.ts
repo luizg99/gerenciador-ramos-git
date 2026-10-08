@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Execution, Repository, Settings } from '../../src/models/domain';
+import type { ReviewMessage } from '../../src/models/reviewMessage';
 export class Storage {
   constructor(private directory: string) {}
   private async read<T>(name: string, fallback: T): Promise<T> {
@@ -17,6 +18,8 @@ export class Storage {
   saveSettings(settings: Settings) { return this.write('settings.json', settings); }
   executions() { return this.read<Execution[]>('executions.json', []); }
   saveExecutions(executions: Execution[]) { return this.write('executions.json', executions); }
+  reviewMessages() { return this.read<ReviewMessage[]>('review-messages.json', []); }
+  saveReviewMessages(messages: ReviewMessage[]) { return this.write('review-messages.json', messages); }
   // Cache da última varredura: só acelera a abertura, então qualquer problema vira lista vazia.
   async repositories(): Promise<Repository[]> {
     const value = await this.read<unknown>('repositories.json', []).catch(() => []);

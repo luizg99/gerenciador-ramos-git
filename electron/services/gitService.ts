@@ -183,6 +183,12 @@ export class GitService {
     return { remote, remoteUrl: redact(remoteUrl), webUrl: azureRepoWebUrl(remoteUrl), defaultTarget: head.startsWith(remote + '/') ? head.slice(remote.length + 1) : null };
   }
   async pullRequestUrl(repo: string, source: string, target: string) { return (await this.pullRequestUrls(repo, [{ source, target }]))[0]; }
+  async pullRequestCommitMessages(repo: string, remote: string, source: string, target: string) {
+    ref.parse(source); ref.parse(target);
+    const from = `refs/remotes/${remote}/${source}`, to = `refs/remotes/${remote}/${target}`;
+    const messages = await this.git(repo, ['log', '--reverse', '--format=%B%x00', `${to}..${from}`, '--']);
+    return messages.split('\0').map(message => message.trim()).filter(Boolean).map(message => `- ${message.replace(/\n/g, '\n  ')}`).join('\n\n');
+  }
   // Valida todos os pares antes de devolver qualquer link: ou abre todos, ou nenhum.
   async pullRequestUrls(repo: string, pairs: { source: string; target: string }[]) {
     if (!pairs.length || pairs.length > 4) throw new Error('Informe de 1 a 4 pull requests.');

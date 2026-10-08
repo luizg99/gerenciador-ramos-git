@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -6,6 +6,8 @@ import { ApplicationController } from './controllers/applicationController';
 import { GitService } from './services/gitService';
 import { Storage } from './services/storage';
 import { hash, planSchema, ref, text } from '../src/models/validation';
+import { parseJiraIssue, reviewInputSchema } from '../src/models/reviewMessage';
+import { AzurePullRequests, prPairsSchema } from './services/azurePullRequests';
 import { redact } from './services/processRunner';
 import type { Snapshot } from '../src/models/domain';
 let window: BrowserWindow | null = null;
@@ -40,15 +42,26 @@ function registerIpc() {
   handle('git:createBranch', z.tuple([id, ref, ref, z.enum(['block', 'carry', 'stash']), z.boolean(), z.boolean()]), (id, name, base, mode, publish, install) => controller.mutate(id, repo => controller.git.createBranch(repo, name, base, mode, publish, install)));
   handle('git:createBranches', z.tuple([id, z.array(z.object({ name: ref, base: ref })).min(1).max(4), z.number().int().min(0).max(3).nullable(), z.enum(['block', 'carry', 'stash']), z.boolean(), z.boolean()]), (id, items, switchTo, mode, publish, install) => controller.mutate(id, repo => controller.git.createBranches(repo, items, switchTo, mode, publish, install)));
   handle('git:pullRequestInfo', z.tuple([id]), id => controller.git.pullRequestInfo(controller.repository(id)));
-  handle('git:openPullRequest', z.tuple([id, ref, ref]), async (id, source, target) => {
-    const url = await controller.git.pullRequestUrl(controller.repository(id), source, target);
-    await shell.openExternal(url); return url;
-  });
-  handle('git:openPullRequests', z.tuple([id, z.array(z.object({ source: ref, target: ref })).min(1).max(4)]), async (id, pairs) => {
-    const urls = await controller.git.pullRequestUrls(controller.repository(id), pairs);
-    for (const url of urls) await shell.openExternal(url);
-    return urls;
-  });
+  handle('reviews:history', z.tuple([]), () => controller.reviews.history());
+  handle('reviews:updateIssue', z.tuple([z.string().uuid(), z.string().max(4096)]), (messageId, issue) => controller.exclusive(() => controller.reviews.updateIssue(messageId, issue)));
+  handle('reviews:openLink', z.tuple([z.string().max(8192).url().refine(value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password; } catch { return false; } })]), url => shell.openExternal(url));
+  handle('git:createPullRequests', z.tuple([id, prPairsSchema, z.string().max(4096)]), (id, pairs, issue) => controller.mutate(id, async repo => {
+    parseJiraIssue(issue);
+    await controller.git.branches(repo, true);
+    await controller.git.pullRequestUrls(repo, pairs);
+    const info = await controller.git.pullRequestInfo(repo);
+    const result = await new AzurePullRequests().create(repo, info, pairs, (source, target) => controller.git.pullRequestCommitMessages(repo, info.remote!, source, target));
+    let message;
+    if (result.prs.length) try { message = await controller.reviews.save(repo, { issue, prs: result.prs }); }
+    catch { result.error = [result.error, 'Os PRs foram obtidos, mas não foi possível salvar o histórico. Os links continuam disponíveis nesta tela.'].filter(Boolean).join('\n'); }
+    return { ...result, message };
+  }));
+  handle('git:findPullRequests', z.tuple([id, prPairsSchema]), (id, pairs) => controller.exclusive(async () => {
+    const repo = controller.repository(id);
+    return new AzurePullRequests().find(repo, await controller.git.pullRequestInfo(repo), pairs);
+  }));
+  handle('reviews:save', z.tuple([id, reviewInputSchema]), (id, input) => controller.exclusive(() => controller.reviews.save(controller.repository(id), input)));
+  handle('reviews:copy', z.tuple([z.string().uuid()]), async messageId => { clipboard.write(await controller.reviews.copy(messageId)); });
   handle('git:pman', z.tuple([id]), id => controller.mutate(id, async repo => { await controller.git.ensureIdle(repo, false); await controller.git.runPman(repo); }));
   handle('git:log', z.tuple([id, ref, z.number().int().min(0).max(1000000)]), (id, branch, skip) => controller.git.log(controller.repository(id), branch, skip));
   handle('git:detail', z.tuple([id, hash]), (id, value) => controller.git.detail(controller.repository(id), value));
@@ -59,6 +72,7 @@ function registerIpc() {
   handle('git:commit', z.tuple([id, z.string().min(1).max(20000)]), (id, message) => controller.mutate(id, repo => controller.git.commit(repo, message)));
   handle('git:push', z.tuple([id]), id => controller.mutate(id, repo => controller.git.push(repo)));
   handle('git:cherryPick', z.tuple([id, planSchema]), (id, plan) => controller.mutate(id, repo => controller.cherry.start(repo, plan)));
+  handle('git:cancelCherryPick', z.tuple([id, z.string().uuid()]), (id, executionId) => controller.mutate(id, repo => controller.cherry.cancel(repo, executionId)));
   handle('git:resume', z.tuple([id, z.string().uuid(), z.enum(['retry', 'manual'])]), (id, executionId, action) => controller.mutate(id, repo => controller.cherry.resume(repo, executionId, action)));
 }
 async function createWindow() {

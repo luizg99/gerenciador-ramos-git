@@ -5,6 +5,7 @@ import { isRepository, scanRepositories } from '../services/repositoryScanner';
 import { Storage } from '../services/storage';
 import { GitService, type Reporter } from '../services/gitService';
 import { CherryPickController } from './cherryPickController';
+import { ReviewMessageController } from './reviewMessageController';
 export class ApplicationController {
   repositories: Repository[] = [];
   settings: Settings = { roots: [] };
@@ -12,7 +13,8 @@ export class ApplicationController {
   scanning = false;
   private scanGeneration = 0;
   readonly cherry: CherryPickController;
-  constructor(readonly git: GitService, private storage: Storage, private report: Reporter = () => {}, private changed: (snapshot: Snapshot) => void = () => {}) { this.cherry = new CherryPickController(git, storage, report); }
+  readonly reviews: ReviewMessageController;
+  constructor(readonly git: GitService, private storage: Storage, private report: Reporter = () => {}, private changed: (snapshot: Snapshot) => void = () => {}) { this.cherry = new CherryPickController(git, storage, report); this.reviews = new ReviewMessageController(storage, git); }
   // Abre com a lista da última sessão e atualiza em segundo plano.
   async initialize() {
     this.settings = await this.storage.settings(); await this.cherry.initialize();

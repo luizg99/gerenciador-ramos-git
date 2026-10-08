@@ -80,6 +80,40 @@ describe('Cherry-pick real, cancelamento, push e recuperação', () => {
     const result = await f.controller.start(f.repo, { source: f.source, commits: [f.first], targets: ['main', 'dev'] });
     expect(result.targets[0].aborted).toBe(true); expect(await git(f.repo, 'rev-parse', 'HEAD')).toBe(before); expect(await f.service.operation(f.repo)).toBeNull(); expect(result.targets[1].phase).toBe('pending');
   });
+  it('cancela a sequência vazia após reiniciar e libera um novo cherry-pick', async () => {
+    const f = await setup();
+    await git(f.repo, 'switch', 'main'); await git(f.repo, 'cherry-pick', f.first); await git(f.repo, 'push');
+    const before = await git(f.repo, 'rev-parse', 'HEAD');
+    const failed = await f.controller.start(f.repo, { source: f.source, commits: [f.first], targets: ['main', 'dev'] });
+    expect(failed.targets[0].aborted).toBe(true);
+    const restarted = new CherryPickController(f.service, f.storage); await restarted.initialize();
+    await expect(restarted.cancel(f.remote, failed.id)).rejects.toThrow('não encontrada');
+    const cancelled = await restarted.cancel(f.repo, failed.id);
+    expect(cancelled.finished).toBe(true); expect(cancelled.cancelledAt).toBeTruthy();
+    expect(cancelled.targets).toEqual(failed.targets);
+    expect(await git(f.repo, 'rev-parse', 'HEAD')).toBe(before);
+    expect(await git(f.remote, 'rev-parse', 'main')).toBe(before);
+    expect((await f.storage.executions())[0]).toEqual(cancelled);
+    const again = new CherryPickController(f.service, f.storage); await again.initialize();
+    await expect(again.resume(f.repo, failed.id, 'retry')).rejects.toThrow('não encontrada');
+    const next = await again.start(f.repo, { source: f.source, commits: [f.first], targets: ['dev'] });
+    expect(next.finished).toBe(true); expect(next.targets[0].phase).toBe('done');
+  });
+  it('cancelar após falha de push preserva destinos enviados, commits locais e arquivos', async () => {
+    const f = await setup();
+    await writeFile(path.join(f.remote, 'hooks', 'update'), '#!/bin/sh\nif [ "$1" = "refs/heads/dev" ]; then exit 1; fi\nexit 0\n', { mode: 0o755 });
+    const failed = await f.controller.start(f.repo, { source: f.source, commits: [f.first], targets: ['main', 'dev', 'release'] });
+    expect(failed.targets.map(t => t.phase)).toEqual(['done', 'failed', 'pending']);
+    const head = await git(f.repo, 'rev-parse', 'HEAD');
+    const sent = await git(f.remote, 'rev-parse', 'main');
+    await writeFile(path.join(f.repo, 'manual.txt'), 'trabalho manual');
+    await f.controller.cancel(f.repo, failed.id);
+    expect(await git(f.repo, 'rev-parse', 'HEAD')).toBe(head);
+    expect(await git(f.remote, 'rev-parse', 'main')).toBe(sent);
+    expect(await git(f.remote, 'rev-parse', 'dev')).toBe(f.base);
+    expect(await git(f.remote, 'rev-parse', 'release')).toBe(f.base);
+    expect(await readFile(path.join(f.repo, 'manual.txt'), 'utf8')).toBe('trabalho manual');
+  });
   it('uma interrupção durante aplicação exige revisão manual e não reaplica silenciosamente', async () => {
     const f = await setup(); await git(f.repo, 'switch', 'main');
     const interrupted = { id: '00000000-0000-4000-8000-000000000001', repoPath: f.repo, source: f.source, commits: [f.first], targets: [{ branch: 'main', phase: 'applying' as const, beforeHead: f.base }], startedAt: new Date().toISOString(), finished: false };

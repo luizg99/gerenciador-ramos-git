@@ -27,6 +27,16 @@
 
 ## Ambiente e limites
 
+### Mensagens e histórico de PRs (08/10/2026)
+
+- Testes de formatação cobrem 05:59, 06:00, 12:00, 12:01, 18:00, 18:01 e meia-noite, Jira opcional, normalização e escape de HTML.
+- Histórico verificado após reinstanciar o armazenamento, com deduplicação, destinos normalizados e recusa de URLs de outro repositório.
+- Consulta REST testada com respostas simuladas: pares exatos, PR ausente, ambíguo, concluído, falhas de autenticação, rede e resposta inválida. Credenciais não aparecem no resultado nem nas mensagens de erro.
+- Teste Electron compila o aplicativo, consulta PRs simulados via um credential helper de teste, gera a prévia, copia texto/HTML, verifica o link curto do Jira e copia uma mensagem anterior pelo filtro de issue.
+- Criação direta: testes da API verificam três POSTs com mensagens dos commits, reaproveitamento de PRs ativos e preservação de resultados parciais após falha. O teste Electron cria três PRs simulados pelo botão e confere descrições com assunto e corpo completo de commits remotos.
+- Ajustes de interface: teste Electron verifica limpeza dos campos após criação, prévia preservada, abertura de link encaminhada ao navegador (substituído no teste), modal de issue com validação, remoção/adição de issue e atualização do texto copiado. Testes de persistência verificam edição do registro existente e recarga do histórico.
+- A autenticação do Azure real da TOTVS e a colagem dentro do Google Chat não foram exercitadas. O teste valida os formatos texto/HTML da área de transferência; não envia mensagens.
+
 - Windows; Node 20.20.0 usado na verificação; Electron 41.7.1; Git for Windows 2.55.0.
 - Node 22.12+ recomendado para o desenvolvimento/empacotamento, conforme requisitos das ferramentas de empacotamento instaladas.
 - O pman proprietário não foi executado. O teste desktop usa um `pman.cmd` temporário que confere os argumentos e termina com sucesso. Os demais testes injetam o comportamento de instalação.

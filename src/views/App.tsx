@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { AppController, type Tab, type ViewModel } from '../controllers/appController';
 import type { FileChange } from '../models/domain';
 import { ref } from '../models/validation';
+import { greeting, parseJiraIssue, type ReviewMessage } from '../models/reviewMessage';
 import { BranchPicker, CommitList, Detail, Diff } from './components';
 const cherryIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="7" cy="17" r="4"/><circle cx="17" cy="16" r="4"/><path d="M7 13C8 8 11 5 15 3M17 12c-1-4-2-7-2-9"/><path d="M15 3c2.5-.5 4.5.5 5 2.5-2.5.5-4-.5-5-2.5z"/></svg>;
 const pullRequestIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5 10.5 6 13 8.5"/></svg>;
@@ -39,7 +40,7 @@ export function App({ controller: c }: { controller: AppController }) {
       <button className={`settings-link ${vm.tab === 'projects' ? 'selected' : ''}`} onClick={() => c.selectTab('projects')} disabled={vm.busy}>▣ Pastas de projetos</button><button className={`settings-link ${vm.tab === 'settings' ? 'selected' : ''}`} onClick={() => c.selectTab('settings')} disabled={vm.busy}>⚙ Configurações</button><div className="sidebar-footer">v0.1.0</div>
     </aside>
     <main><header className="topbar"><div className="topbar-title">{repo ? <nav className="crumbs" aria-label="Caminho do projeto" title={repo.path}>{crumbs(repo.path, vm.snapshot.settings.roots).map((part, i, all) => i === all.length - 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}<i>/</i></span>)}</nav> : <strong>Nenhum projeto selecionado</strong>}{vm.status && <span className="branch-badge" title="Ramo atual">⑂ {vm.status.branch}</span>}{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado local do repositório">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy} onClick={c.fetch} title="Busca ramos e commits novos do remoto (git fetch)">⇣ Buscar do remoto</button>}</div></header>
-      <div className="page"><div className="page-heading"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1><p>{({ settings: 'Preferências do aplicativo, lembradas neste computador.', projects: 'Escolha as pastas onde ficam seus repositórios.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Prepare os arquivos, crie o commit e envie.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Abra no Azure a criação de um pull request entre dois ramos.' })[vm.tab]}</p></div>
+      <div className="page"><div className="page-heading"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1><p>{({ settings: 'Preferências do aplicativo, lembradas neste computador.', projects: 'Escolha as pastas onde ficam seus repositórios.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Prepare os arquivos, crie o commit e envie.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Crie os pull requests no Azure com as mensagens dos commits na descrição.' })[vm.tab]}</p></div>
       {vm.error && <div className="alert error" role="alert"><strong>Não foi possível concluir</strong><p>{vm.error}</p><button onClick={() => c.set({ error: '' })}>Fechar</button></div>}
       {vm.notice && <div className="alert success" role="status">{vm.notice}</div>}
       {vm.busy && <div className="running" role="status"><span className="spinner"/> {vm.busyMessage || 'Carregando...'}</div>}
@@ -103,6 +104,12 @@ function Switch({ c, vm }: Props) {
         : creating ? <button className="primary" disabled={!validName || !base || blocked} onClick={c.createBranch}>Criar ramo e trocar →</button> : <button className="primary" disabled={!target || blocked} onClick={c.switchBranch}>{c.installOnSwitch ? 'Trocar ramo e instalar →' : 'Trocar ramo →'}</button>}</div></section>;
 }
 function PullRequest({ c, vm }: Props) {
+  const missingIssueDialog = useRef<HTMLDialogElement>(null);
+  const jiraInput = useRef<HTMLInputElement>(null);
+  const create = () => {
+    if (!vm.jiraIssue.trim()) missingIssueDialog.current?.showModal();
+    else void c.createPullRequests();
+  };
   const info = vm.prInfo;
   if (!info) return <section className="card"><div className="empty small">Lendo o remoto do repositório…</div></section>;
   if (!info.webUrl) return <section className="card"><div className="empty"><span className="empty-symbol">⇄</span><h3>Remoto não é do Azure DevOps</h3><p>{info.remoteUrl ? <>O remoto <code>{info.remote}</code> aponta para <code>{info.remoteUrl}</code>. A criação de pull request funciona com repositórios do Azure Repos.</> : 'Este repositório não tem remoto configurado.'}</p></div></section>;
@@ -118,8 +125,17 @@ function PullRequest({ c, vm }: Props) {
   const rows = vm.prRows.map(row => check(row.source, row.target));
   const pairs = rows.map(r => `${r.source}→${r.target}`);
   const rowsReady = rows.every((r, i) => r.ready && pairs.indexOf(pairs[i]) === i);
-  return <section className="card switch-card">
+  return <><section className="card switch-card">
+    <dialog ref={missingIssueDialog} className="issue-dialog" aria-labelledby="missing-issue-title">
+      <h2 id="missing-issue-title">Issue Jira não informada</h2>
+      <p>O campo Issue Jira está vazio. Deseja prosseguir com a criação dos PRs sem vincular uma issue?</p>
+      <div className="card-actions">
+        <button autoFocus onClick={() => { missingIssueDialog.current?.close(); jiraInput.current?.focus(); }}>Voltar e preencher</button>
+        <button className="primary" onClick={() => { missingIssueDialog.current?.close(); void c.createPullRequests(); }}>Prosseguir sem issue</button>
+      </div>
+    </dialog>
     <div className="summary"><span>Azure Repos <strong>{info.webUrl.replace(/^https?:\/\//, '')}</strong></span></div>
+    <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
     <label className="manual-check dynamic-toggle"><input type="checkbox" checked={vm.dynamicPr} onChange={e => c.set({ dynamicPr: e.target.checked })}/>PR dinâmico <small>(até 4 de uma vez)</small></label>
     {vm.dynamicPr ? <div className="batch">
       {vm.prRows.map((row, index) => <div className="batch-row pr-row" key={index}>
@@ -128,17 +144,65 @@ function PullRequest({ c, vm }: Props) {
         <span className="pr-arrow" aria-hidden="true">→</span>
         <BranchPicker label={`Destino (${index + 1})`} value={row.target} branches={vm.branches} onChange={target => c.setPrRow(index, { target })}/>
         <button className="icon danger visible" title="Remover linha" aria-label={`Remover pull request ${index + 1}`} onClick={() => c.removePrRow(index)}>×</button>
+        {row.url && <p className="row-error">PR: <ReviewLink c={c} url={row.url}/></p>}
         {(rows[index].error || pairs.indexOf(pairs[index]) !== index && rows[index].ready) && <p className="row-error">{rows[index].error || 'Pull request repetido.'}</p>}
       </div>)}
       {vm.prRows.length < 4 && <button className="quiet add-row" onClick={c.addPrRow}>+ Adicionar pull request</button>}
     </div> : <>
-      <div className="pr-fields"><BranchPicker label="Origem (seu ramo)" value={vm.prSource} branches={vm.branches} onChange={prSource => c.set({ prSource })}/><span className="pr-arrow" aria-hidden="true">→</span><BranchPicker label="Destino" value={vm.prTarget} branches={vm.branches} onChange={prTarget => c.set({ prTarget })}/></div>
+      <div className="pr-fields"><BranchPicker label="Origem (seu ramo)" value={vm.prSource} branches={vm.branches} onChange={prSource => c.setSinglePr({ prSource })}/><span className="pr-arrow" aria-hidden="true">→</span><BranchPicker label="Destino" value={vm.prTarget} branches={vm.branches} onChange={prTarget => c.setSinglePr({ prTarget })}/></div>
       {single.source && !published(single.source) && <div className="create-branch"><p>O ramo <code>{single.source}</code> ainda não está no remoto. Envie-o antes de abrir o pull request.</p>{single.source === vm.status?.branch ? <button onClick={c.push}>↑ Enviar {single.source} para o remoto</button> : <p className="hint">Troque para esse ramo e use “Enviar”, ou escolha um ramo já publicado.</p>}</div>}
       {single.source && single.target && single.source === single.target && <p className="inline-warning">Origem e destino precisam ser diferentes.</p>}
     </>}
-    <div className="card-actions"><p className="hint">Abre a página de criação de PR do Azure com origem e destino preenchidos{vm.dynamicPr ? ' (uma aba por PR)' : ''}. Título, descrição, revisores e work items você completa lá.</p>
-      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={c.openPullRequests}>{`Abrir ${vm.prRows.length} ${vm.prRows.length === 1 ? 'pull request' : 'pull requests'} no Azure ↗`}</button>
-        : <button className="primary" disabled={!single.ready} onClick={c.openPullRequest}>Abrir pull request no Azure ↗</button>}</div>
+    <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição inclui as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages). O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
+      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${vm.prRows.length} ${vm.prRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
+        : <button className="primary" disabled={!single.ready} onClick={create}>Criar pull request no Azure</button>}</div>
+  </section><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
+}
+function ReviewComposer({ c, vm }: Props) {
+  const preview = c.reviewPreview;
+  let issueError = '';
+  try { parseJiraIssue(vm.jiraIssue); } catch (error) { issueError = (error as Error).message; }
+  const pairs = vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }];
+  return <section className="card review-composer">
+    <div className="card-heading"><div><h2>Mensagem para revisão</h2><p className="hint">Depois de criar os PRs no Azure, os links são consultados pela origem e pelo destino.</p></div><button disabled={!!issueError || pairs.some(pair => !pair.source.trim() || !pair.target.trim())} onClick={c.findPullRequests}>Buscar PRs e gerar mensagem</button></div>
+    {issueError && <p className="inline-warning padded">{issueError}</p>}
+    {preview ? <><div className="review-message" aria-label="Prévia da mensagem"><p>{greeting()}, Tarefa finalizada</p>{preview.issue && <p>Tarefa disponível para revisão:<br/><ReviewLink c={c} url={preview.issue.url} label={preview.issue.key}/></p>}<p>PRs</p>{preview.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url}/></p>)}</div><div className="card-actions"><p className="hint">Cole com Ctrl+V para manter o código do Jira como link. A saudação usa o horário local no momento da cópia.</p><button className="primary" onClick={c.copyReview}>Copiar mensagem</button></div></> : <p className="hint padded">Os links finais e o texto aparecerão aqui. Sem Issue Jira, a mensagem terá a saudação e a lista de PRs.</p>}
+  </section>;
+}
+function ReviewLink({ c, url, label }: { c: AppController; url: string; label?: string }) {
+  return <a className="review-link" href={url} onClick={event => { event.preventDefault(); void c.openReviewLink(url); }}>{label ?? url}</a>;
+}
+function ReviewHistory({ c, vm }: Props) {
+  const [editing, setEditing] = useState<ReviewMessage | null>(null);
+  const [issueValue, setIssueValue] = useState('');
+  const [issueError, setIssueError] = useState('');
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { if (editing) dialog.current?.showModal(); else dialog.current?.close(); }, [editing]);
+  const saveIssue = async () => {
+    try { parseJiraIssue(issueValue); } catch (error) { setIssueError((error as Error).message); return; }
+    if (!editing) return;
+    if (await c.updateReviewIssue(editing.id, issueValue)) setEditing(null);
+    else setIssueError(c.getSnapshot().error || 'Não foi possível salvar a issue.');
+  };
+  const query = vm.reviewSearch.trim().toLowerCase();
+  const groups = new Map<string, ReviewMessage[]>();
+  for (const message of vm.reviewMessages) {
+    const key = message.issue?.key ?? 'Sem issue';
+    if (query && !`${key} ${message.repositoryName} ${message.prs.map(pr => pr.target).join(' ')}`.toLowerCase().includes(query)) continue;
+    groups.set(key, [...(groups.get(key) ?? []), message]);
+  }
+  return <section className="card review-history"><div className="card-heading"><h2>Histórico por issue</h2><label className="field">Buscar no histórico<input value={vm.reviewSearch} onChange={e => c.set({ reviewSearch: e.target.value })} placeholder="Issue, projeto ou destino"/></label></div>
+    <dialog ref={dialog} className="issue-dialog" aria-labelledby="issue-dialog-title" onCancel={event => { if (vm.busy) event.preventDefault(); else setEditing(null); }}>
+      {editing && <form onSubmit={event => { event.preventDefault(); void saveIssue(); }}>
+        <h2 id="issue-dialog-title">{editing?.issue ? 'Alterar issue do jira' : 'Adicionar issue'}</h2>
+        <label className="field">Issue Jira<input autoFocus value={issueValue} onChange={event => { setIssueValue(event.target.value); setIssueError(''); }} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
+        <p className="hint">Atualiza a mensagem salva. Deixe vazio para remover a issue.</p>
+        {issueError && <p role="alert" className="inline-warning">{issueError}</p>}
+        <div className="card-actions"><button type="button" disabled={vm.busy} onClick={() => setEditing(null)}>Cancelar</button><button className="primary" disabled={vm.busy} type="submit">Salvar issue</button></div>
+      </form>}
+    </dialog>
+    {!groups.size && <p className="hint padded">{query ? 'Nenhuma mensagem encontrada.' : 'As mensagens geradas ficam salvas neste computador para copiar novamente.'}</p>}
+    {[...groups].map(([issue, messages]) => <details key={issue} open={!!query}><summary>{issue} <span className="pill">{messages.length} {messages.length === 1 ? 'mensagem' : 'mensagens'}</span></summary>{messages.map(message => <article key={message.id}><div className="history-message-heading"><strong>{message.repositoryName}</strong><small>{new Date(message.createdAt).toLocaleString('pt-BR')}</small><button onClick={() => { setEditing(message); setIssueValue(message.issue?.key ?? ""); setIssueError(""); }}>{message.issue ? "Alterar issue do jira" : "Adicionar issue"}</button><button onClick={() => c.copyPreviousReview(message.id)}>Copiar mensagem anterior</button></div>{message.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url}/></p>)}</article>)}</details>)}
   </section>;
 }
 function Settings({ c, vm }: Props) {
@@ -186,7 +250,7 @@ function Cherry({ c, vm }: Props) {
   return <><div className="cherry-layout"><section className="card"><div className="card-heading"><div><span className="step-label">1 · Origem</span><h2>Escolha o que levar</h2></div><span className="pill">{vm.selectedCommits.length} selecionados</span></div><div className="toolbar"><BranchPicker label="Ramo de origem" value={vm.source} branches={vm.branches} onChange={c.setSource}/><button disabled={!vm.source} onClick={() => c.loadSource()}>Carregar commits</button></div><CommitList commits={vm.sourceCommits} selected={vm.selectedCommits} active={vm.selectedCommit} selectable onSelect={c.toggleCommit} onInspect={c.showCommit}/>{!!vm.sourceCommits.length && <button className="load-more" onClick={() => c.loadSource(true)}>Carregar mais commits</button>}<p className="hint padded">Os commits serão aplicados do mais antigo ao mais novo, respeitando o histórico da origem.</p></section>
     <section className="card destinations"><div className="card-heading"><div><span className="step-label">2 · Destinos</span><h2>Defina a sequência</h2></div></div>{vm.targets.map((target, index) => <div className="destination" key={index}><span className="step-number">{index + 1}</span><BranchPicker label={`Destino ${index + 1}${index ? ' · opcional' : ' · obrigatório'}`} value={target} branches={vm.branches} onChange={value => c.setTarget(index, value)} disabled={!vm.source || index > 0 && !vm.targets[index - 1]}/></div>)}<p className="hint">Em cada destino: trocar ramo → cherry-pick → push. Uma falha interrompe os destinos seguintes.</p><button className="primary wide" disabled={!vm.source || !vm.selectedCommits.length || !vm.targets[0] || !!execution && !execution.finished} onClick={c.review}>Revisar sequência →</button></section></div>
     {vm.review && <section className="card review"><h2>Pronto para aplicar e enviar</h2><p><strong>{vm.selectedCommits.length} commits</strong> de <code>{vm.source}</code> serão enviados para:</p><div className="route">{vm.targets.filter(Boolean).map((t, i) => <span key={i}>{i > 0 && '→ '}<code>{t}</code></span>)}</div><div className="review-commits">{vm.sourceCommits.filter(c => vm.selectedCommits.includes(c.hash)).map(c => <p key={c.hash}><code>{c.hash.slice(0, 8)}</code> {c.subject}</p>)}</div><p className="hint">A atualização remota ocorre antes de começar. Destinos com commits locais pendentes precisam ser revisados e enviados primeiro.</p><div className="card-actions"><button onClick={() => c.set({ review: false })}>Voltar</button><button className="primary" onClick={c.execute}>Aplicar commits e fazer push</button></div></section>}
-    {execution && <section className="card"><div className="card-heading"><h2>{execution.finished ? 'Última sequência concluída' : 'Sequência pendente'}</h2><small>{new Date(execution.startedAt).toLocaleString('pt-BR')}</small></div><p className="hint padded">Origem: {execution.source} · {execution.commits.map(h => h.slice(0, 8)).join(', ')}</p>{execution.targets.map((t, i) => <div className="execution-target" key={i}><div><span className={`phase-dot ${t.phase}`}/><strong>{t.branch}</strong><span className="pill">{({ pending: 'Não iniciado', switching: 'Trocando ramo', pman: 'Executando pman', applying: 'Aplicando commits', pushing: 'Enviando', done: 'Push concluído', failed: 'Falhou', interrupted: 'Interrompido' })[t.phase]}</span></div>{t.error && <pre className="execution-error">{t.error}</pre>}</div>)}{!execution.finished && <div className="recovery"><button onClick={() => c.resume('retry')}>{execution.targets.find(t => t.phase !== 'done')?.failedAt === 'pushing' ? 'Tentar somente o push e continuar' : 'Tentar destino novamente'}</button><label className="manual-check"><input type="checkbox" checked={vm.manualConfirmed} onChange={e => c.set({ manualConfirmed: e.target.checked })}/>Concluí o cherry-pick manualmente no destino pendente e revisei todos os commits locais que serão enviados.</label><button disabled={!vm.manualConfirmed} onClick={() => c.resume('manual')}>Enviar resultado manual e continuar</button><p className="hint">Para a conclusão manual, deixe o destino pendente selecionado no Git e sem conflitos ou arquivos alterados. Destinos já enviados serão preservados.</p></div>}</section>}
+    {execution && <section className="card"><div className="card-heading"><h2>{execution.cancelledAt ? 'Última sequência cancelada' : execution.finished ? 'Última sequência concluída' : 'Sequência pendente'}</h2><small>{new Date(execution.startedAt).toLocaleString('pt-BR')}</small></div><p className="hint padded">Origem: {execution.source} · {execution.commits.map(h => h.slice(0, 8)).join(', ')}</p>{execution.targets.map((t, i) => <div className="execution-target" key={i}><div><span className={`phase-dot ${t.phase}`}/><strong>{t.branch}</strong><span className="pill">{({ pending: 'Não iniciado', switching: 'Trocando ramo', pman: 'Executando pman', applying: 'Aplicando commits', pushing: 'Enviando', done: 'Push concluído', failed: 'Falhou', interrupted: 'Interrompido' })[t.phase]}</span></div>{t.error && <pre className="execution-error">{t.error}</pre>}</div>)}{!execution.finished && <div className="recovery"><button onClick={c.cancelCherryPick}>Cancelar sequência</button><p className="hint">Encerra esta sequência e libera uma nova tentativa. Commits e arquivos são preservados. Conflitos ou operações ainda abertas no Git precisam ser resolvidos separadamente.</p><button onClick={() => c.resume('retry')}>{execution.targets.find(t => t.phase !== 'done')?.failedAt === 'pushing' ? 'Tentar somente o push e continuar' : 'Tentar destino novamente'}</button><label className="manual-check"><input type="checkbox" checked={vm.manualConfirmed} onChange={e => c.set({ manualConfirmed: e.target.checked })}/>Concluí o cherry-pick manualmente no destino pendente e revisei todos os commits locais que serão enviados.</label><button disabled={!vm.manualConfirmed} onClick={() => c.resume('manual')}>Enviar resultado manual e continuar</button><p className="hint">Para a conclusão manual, deixe o destino pendente selecionado no Git e sem conflitos ou arquivos alterados. Destinos já enviados serão preservados.</p></div>}</section>}
     {vm.detail && <section className="card"><div className="card-heading"><h2>Revisão do commit <code>{vm.selectedCommit.slice(0, 8)}</code></h2><button onClick={() => c.set({ detail: undefined })}>Fechar diff</button></div><Detail detail={vm.detail} selectedFile={vm.selectedCommitFile} onSelectFile={c.showCommitFile}/></section>}
   </>;
 }

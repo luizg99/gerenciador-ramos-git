@@ -1,5 +1,6 @@
 import type { Api, Branch, Commit, CommitDetail, Execution, FileChange, Progress, PullRequestInfo, Snapshot, Status, SwitchMode } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
+import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
 export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings';
 export interface ViewModel {
   snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
@@ -10,6 +11,7 @@ export interface ViewModel {
   manualConfirmed: boolean; loadingRepository: boolean;
   createBase: string; publishNew: boolean; installOnSwitch: boolean; prInfo?: PullRequestInfo; prSource: string; prTarget: string;
   dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[];
+  jiraIssue: string; prUrl: string; reviewMessages: ReviewMessage[]; reviewSearch: string; generatedReview?: ReviewMessage;
 }
 // Estado esperado de um arquivo logo após marcar/desmarcar, até o status real chegar.
 function optimistic(f: FileChange, unstage: boolean): FileChange {
@@ -17,7 +19,7 @@ function optimistic(f: FileChange, unstage: boolean): FileChange {
   return f.index === '?' ? { ...f, index: 'A', worktree: ' ' } : { ...f, index: f.worktree !== ' ' ? f.worktree : f.index, worktree: ' ' };
 }
 export interface BranchRow { name: string; base: string }
-export interface PrRow { source: string; target: string }
+export interface PrRow { source: string; target: string; url?: string }
 // Checks lembrados entre aberturas (só nesta máquina). Na primeira vez, todos desmarcados.
 const preferenceKeys = ['dynamicBranches', 'dynamicPr', 'installOnSwitch'] as const;
 function loadPreferences(): Partial<ViewModel> {
@@ -40,6 +42,7 @@ export class AppController {
     commitMessage: '', workingFile: '', workingStaged: false, workingDiff: '', progress: [], manualConfirmed: false, loadingRepository: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
     dynamicBranches: false, branchRows: [{ name: '', base: '' }], switchRow: null, dynamicPr: false, prRows: [{ source: '', target: '' }],
+    jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: '',
     ...loadPreferences()
   };
   constructor(private api: Api) {}
@@ -131,6 +134,7 @@ export class AppController {
   scan = () => this.action(async () => { this.set({ snapshot: await this.api.scan() }); }, true, 'Procurando repositórios…');
   selectRepository = (id: string) => this.action(async () => {
     await this.api.selectRepository(id);
+    this.set({ jiraIssue: '', prUrl: '', generatedReview: undefined });
     this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', detail: undefined, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: [{ name: '', base: '' }], switchRow: null, prRows: [{ source: '', target: '' }], workingFile: '', workingDiff: '', commitMessage: '', progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
@@ -155,12 +159,12 @@ export class AppController {
   private async loadPullRequest() {
     if (!this.repository) return;
     try {
-      const id = this.id; const prInfo = await this.api.pullRequestInfo(id);
+      const id = this.id; const [prInfo, reviewMessages] = await Promise.all([this.api.pullRequestInfo(id), this.api.reviewHistory()]);
       if (this.repository?.id !== id) return;
       const current = this.state.status?.branch;
       const source = current && !current.startsWith('(') ? current : '';
       const [first, ...rest] = this.state.prRows;
-      this.set({ prInfo, prSource: this.state.prSource || source, prTarget: this.state.prTarget || prInfo.defaultTarget || '', prRows: [{ source: first.source || source, target: first.target || prInfo.defaultTarget || '' }, ...rest] });
+      this.set({ prInfo, reviewMessages, prSource: this.state.prSource || source, prTarget: this.state.prTarget || prInfo.defaultTarget || '', prRows: [{ ...first, source: first.source || source, target: first.target || prInfo.defaultTarget || '' }, ...rest] });
     } catch (error) { this.set({ error: (error as Error).message }); }
   }
   // Criação dinâmica: até 4 ramos, cada um com sua base; no máximo um vira o ramo atual.
@@ -182,17 +186,67 @@ export class AppController {
     this.set({ notice: parts.join(' '), branchRows: [{ name: '', base: '' }], switchRow: null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
   }, true, 'Criando ramos…');
   // PR dinâmico: até 4 pares origem → destino, abertos de uma vez.
-  setPrRow = (index: number, patch: Partial<PrRow>) => this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch } : row) });
+  setPrRow = (index: number, patch: Partial<PrRow>) => this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch, url: undefined } : row) });
+  setSinglePr = (patch: Partial<Pick<ViewModel, 'prSource' | 'prTarget'>>) => this.set({ ...patch, prUrl: '' });
+  get reviewInput() {
+    return { issue: this.state.jiraIssue, prs: this.state.dynamicPr ? this.state.prRows.map(row => ({ target: row.target, url: row.url ?? '' })) : [{ target: this.state.prTarget, url: this.state.prUrl }] };
+  }
+  get reviewPreview() {
+    if (this.state.generatedReview) return { ...this.state.generatedReview, ...formatReviewMessage(this.state.generatedReview) };
+    try {
+      const input = reviewInputSchema.parse(this.reviewInput);
+      const remote = this.state.prInfo?.remote;
+      const prs = input.prs.map(pr => ({ ...pr, target: remote && pr.target.startsWith(remote + '/') ? pr.target.slice(remote.length + 1) : pr.target }));
+      const issue = parseJiraIssue(input.issue);
+      return { issue, prs, ...formatReviewMessage({ issue, prs }) };
+    } catch { return undefined; }
+  }
+  findPullRequests = () => this.action(async () => {
+    parseJiraIssue(this.state.jiraIssue);
+    const pairs = this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }];
+    const found = await this.api.findPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })));
+    if (this.state.dynamicPr) this.set({ prRows: this.state.prRows.map((row, index) => ({ ...row, url: found[index].url })) });
+    else this.set({ prUrl: found[0].url });
+    const generatedReview = await this.api.saveReviewMessage(this.id, this.reviewInput);
+    this.set({ generatedReview });
+    this.set({ reviewMessages: await this.api.reviewHistory(), notice: 'PRs encontrados. Mensagem gerada e salva no histórico; pronta para copiar.' });
+  }, false, 'Buscando os PRs no Azure…');
+  copyReview = () => this.action(async () => {
+    const message = this.state.generatedReview ?? await this.api.saveReviewMessage(this.id, this.reviewInput);
+    this.set({ reviewMessages: await this.api.reviewHistory() });
+    await this.api.copyReviewMessage(message.id);
+    this.set({ notice: 'Mensagem copiada com o link formatado do Jira. Cole no Google Chat com Ctrl+V.' });
+  });
+  copyPreviousReview = (messageId: string) => this.action(async () => {
+    await this.api.copyReviewMessage(messageId);
+    this.set({ notice: 'Mensagem do histórico copiada com a saudação do horário atual. Cole no Google Chat com Ctrl+V.' });
+  });
+  openReviewLink = (url: string) => this.action(async () => { await this.api.openReviewLink(url); });
+  updateReviewIssue = async (messageId: string, issue: string) => {
+    let updated = false;
+    await this.action(async () => {
+      const message = await this.api.updateReviewIssue(messageId, issue);
+      this.set({ reviewMessages: this.state.reviewMessages.map(item => item.id === message.id ? message : item), ...(this.state.generatedReview?.id === message.id ? { generatedReview: message } : {}), reviewSearch: '', notice: 'Issue Jira atualizada na mensagem e no histórico.' });
+      updated = true;
+    });
+    return updated;
+  };
   addPrRow = () => { if (this.state.prRows.length < 4) this.set({ prRows: [...this.state.prRows, { source: this.state.prRows[0]?.source ?? '', target: '' }] }); };
   removePrRow = (index: number) => { const rows = this.state.prRows.filter((_, i) => i !== index); this.set({ prRows: rows.length ? rows : [{ source: '', target: '' }] }); };
-  openPullRequests = () => this.action(async () => {
-    const urls = await this.api.openPullRequests(this.id, this.state.prRows.map(row => ({ source: row.source.trim(), target: row.target.trim() })));
-    this.set({ notice: `${urls.length} ${urls.length === 1 ? 'página de pull request aberta' : 'páginas de pull request abertas'} no navegador. Complete cada uma no Azure.` });
-  });
-  openPullRequest = () => this.action(async () => {
-    await this.api.openPullRequest(this.id, this.state.prSource, this.state.prTarget);
-    this.set({ notice: 'Página de criação do pull request aberta no navegador. Complete título, descrição e revisores no Azure.' });
-  });
+  createPullRequests = () => this.action(async () => {
+    parseJiraIssue(this.state.jiraIssue);
+    const pairs = this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }];
+    const result = await this.api.createPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })), this.state.jiraIssue);
+    this.set({ generatedReview: result.message });
+    const remote = this.state.prInfo?.remote;
+    const short = (value: string) => remote && value.trim().startsWith(remote + '/') ? value.trim().slice(remote.length + 1) : value.trim();
+    const urlFor = (row: PrRow) => result.prs.find(pr => pr.source === short(row.source) && pr.target === short(row.target))?.url;
+    if (this.state.dynamicPr) this.set({ prRows: this.state.prRows.map(row => ({ ...row, url: urlFor(row) })) });
+    else this.set({ prUrl: urlFor(pairs[0]) ?? '' });
+    if (!result.error) this.set({ jiraIssue: '', prSource: '', prTarget: '', prUrl: '', prRows: [{ source: '', target: '' }] });
+    this.set({ error: result.error ?? '', notice: `${result.prs.filter(pr => pr.created).length} PR(s) criado(s), ${result.prs.filter(pr => !pr.created).length} já existente(s).${result.error ? ' Os resultados concluídos foram preservados; tente novamente para continuar.' : ' Descrições preenchidas com as mensagens dos commits. Mensagem para revisão pronta para copiar.'}` });
+    this.set({ reviewMessages: await this.api.reviewHistory() });
+  }, false, 'Criando PRs com as mensagens dos commits…');
   runPman = () => this.action(async () => { await this.api.runPman(this.id); this.set({ notice: 'Dependências instaladas.' }); }, true);
   loadHistory = (ref: string, more = false) => this.action(async () => {
     this.set({ historyRef: ref });
@@ -218,6 +272,12 @@ export class AppController {
   execute = () => this.action(async () => {
     const execution = await this.api.cherryPick(this.id, { source: this.state.source, commits: this.state.selectedCommits, targets: targetsFromFields(this.state.targets) });
     this.set({ review: false, manualConfirmed: false, notice: execution.finished ? 'Todos os destinos receberam os commits e o push foi concluído.' : 'Sequência interrompida. Confira o destino abaixo.' });
+  }, true);
+  cancelCherryPick = () => this.action(async () => {
+    const execution = this.execution;
+    if (!execution || execution.finished) return;
+    await this.api.cancelCherryPick(this.id, execution.id);
+    this.set({ review: false, manualConfirmed: false, notice: 'Sequência cancelada. Você pode preparar um novo cherry-pick. Os commits e arquivos foram preservados; se houver uma operação Git em andamento, resolva-a antes de executar a nova sequência.' });
   }, true);
   resume = (action: 'retry' | 'manual') => this.action(async () => {
     const execution = this.execution;

@@ -267,3 +267,22 @@ main{min-width:0;display:flex;flex-direction:column}
 .setting-row strong{font-size:14px;font-weight:600}
 .setting-row p{margin:4px 0 0;font-size:13px;color:var(--muted);max-width:70ch}
 .settings-link+.settings-link{margin-top:0}
+.jira-issue{margin-bottom:20px;max-width:600px}
+.jira-issue small{color:var(--muted);font-weight:400}
+.review-message{padding:4px 20px;line-height:1.7;overflow-wrap:anywhere}
+.review-message p{margin:16px 0}
+.review-message a,.review-link{color:#a9c5ff}
+.review-composer .card-actions{padding:16px 20px;border-top:1px solid var(--line)}
+.review-composer .card-heading{gap:20px;align-items:center}
+.review-history details{border-top:1px solid var(--line);padding:14px 20px}
+.review-history summary{cursor:pointer;font-weight:600}
+.review-history summary .pill{margin-left:8px}
+.review-history article{padding:16px 0;border-top:1px solid var(--line);margin-top:14px;font-size:13px;overflow-wrap:anywhere}
+.history-message-heading{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.history-message-heading small{color:var(--muted)}
+.history-message-heading button{margin-left:auto}
+.review-link{overflow-wrap:anywhere;text-decoration:underline;cursor:pointer}
+.issue-dialog{width:min(520px,90vw);padding:24px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px}
+.issue-dialog::backdrop{background:rgba(0,0,0,.6)}
+.issue-dialog h2{margin:0 0 20px}
+.issue-dialog .card-actions{justify-content:flex-end;gap:12px}
