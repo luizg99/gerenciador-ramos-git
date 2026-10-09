@@ -26,13 +26,15 @@ test('Electron: projetos, consulta Git real, histórico, validações e fronteir
   await page.getByLabel('Criação dinâmica de ramos').check();
   await page.getByLabel('Nome do ramo 1').fill('lote/um'); await page.getByRole('button', { name: '+ Adicionar ramo' }).click();
   await page.getByLabel('Nome do ramo 2').fill('lote/dois'); await page.getByLabel('A partir de (2)').fill('lote/um');
-  await expect(page.getByRole('button', { name: 'Criar 2 ramos →' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Criar 2 ramos e trocar →' })).toBeEnabled();
   await page.getByLabel('Nome do ramo 2').fill('dev'); await expect(page.getByText('Esse ramo já existe.')).toBeVisible();
   await page.getByLabel('Criação dinâmica de ramos').uncheck(); await expect(page.getByLabel('Ramo', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '⚙ Configurações' }).click();
   const usePman = page.getByLabel('Usa pman'); await expect(usePman).not.toBeChecked(); await usePman.check();
   await expect.poll(async () => JSON.parse(await readFile(path.join(data, 'settings.json'), 'utf8')).usePman).toBe(true);
   await page.getByRole('button', { name: 'Criar / Alterar ramo', exact: true }).click(); await page.getByLabel('Ramo', { exact: true }).fill('dev');
+  await expect(page.getByLabel('Executar pman ao trocar ramo')).not.toBeChecked();
+  await page.getByLabel('Executar pman ao trocar ramo').check();
   await expect(page.getByRole('button', { name: 'Trocar ramo e instalar →' })).toBeVisible(); await expect(page.getByRole('button', { name: /Executar pman/ })).toBeVisible();
   await page.getByRole('button', { name: '⚙ Configurações' }).click(); await usePman.uncheck();
   await expect.poll(async () => JSON.parse(await readFile(path.join(data, 'settings.json'), 'utf8')).usePman).toBe(false);

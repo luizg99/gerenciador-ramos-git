@@ -73,7 +73,7 @@ describe('AppController', () => {
       expect(first.getSnapshot()).toMatchObject({ dynamicBranches: false, dynamicPr: false, installOnSwitch: false, publishNew: true });
       first.set({ dynamicBranches: true, installOnSwitch: true });
       const second = new AppController(fakeApi().api);
-      expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: false, installOnSwitch: true, publishNew: true });
+      expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: false, installOnSwitch: true, publishNew: true, switchRow: 0 });
     } finally { vi.unstubAllGlobals(); }
   });
   it('linhas dinâmicas: até 4, remoção ajusta qual ramo será o atual', () => {
@@ -81,7 +81,7 @@ describe('AppController', () => {
     for (let i = 0; i < 5; i++) c.addBranchRow();
     expect(c.getSnapshot().branchRows).toHaveLength(4);
     c.toggleSwitchRow(2); c.removeBranchRow(0); expect(c.getSnapshot().switchRow).toBe(1);
-    c.removeBranchRow(1); expect(c.getSnapshot().switchRow).toBeNull();
-    c.toggleSwitchRow(0); c.toggleSwitchRow(0); expect(c.getSnapshot().switchRow).toBeNull();
+    c.removeBranchRow(1); expect(c.getSnapshot().switchRow).toBe(0);
+    c.toggleSwitchRow(0); expect(c.getSnapshot().switchRow).toBeNull();
   });
 });

@@ -38,8 +38,9 @@ export function greeting(date = new Date()): string {
 }
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 export function formatReviewMessage(message: Pick<ReviewMessage, 'issue' | 'prs'>, date = new Date()) {
-  const intro = `${greeting(date)}, Tarefa finalizada`;
-  const text = [intro, ...(message.issue ? [`Tarefa disponível para revisão:\n${message.issue.url}`] : []), 'PRs', ...message.prs.map(pr => `${pr.target}: ${pr.url}`)].join('\n\n');
-  const html = `<div>${escapeHtml(intro)}<br><br>${message.issue ? `Tarefa disponível para revisão:<br><a href="${escapeHtml(message.issue.url)}">${escapeHtml(message.issue.key)}</a><br><br>` : ''}PRs<br><br>${message.prs.map(pr => `${escapeHtml(pr.target)}: <a href="${escapeHtml(pr.url)}">${escapeHtml(pr.url)}</a>`).join('<br><br>')}</div>`;
+  const intro = `${greeting(date)}, tarefa finalizada, disponível para revisão.`;
+  // Google Chat's plain-text custom-link syntax renders the Jira key while retaining its URL.
+  const text = [intro, ...(message.issue ? [`Issue do Jira:\n<${message.issue.url}|${message.issue.key}>`] : []), 'PRs:', ...message.prs.map(pr => `${pr.target}: ${pr.url}`)].join('\n\n');
+  const html = `<div>${escapeHtml(intro)}<br><br>${message.issue ? `Issue do Jira:<br><a href="${escapeHtml(message.issue.url)}">${escapeHtml(message.issue.key)}</a><br><br>` : ''}PRs:<br><br>${message.prs.map(pr => `${escapeHtml(pr.target)}: <a href="${escapeHtml(pr.url)}">${escapeHtml(pr.url)}</a>`).join('<br><br>')}</div>`;
   return { text, html };
 }

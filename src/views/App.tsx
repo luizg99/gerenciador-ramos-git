@@ -58,6 +58,7 @@ const validBranchName = (name: string) => ref.safeParse(name).success && !name.e
 const asBranch = (name: string) => ({ ref: `refs/heads/${name}`, name, remote: false, current: false, upstream: '' });
 const modes = [{ value: 'block', title: 'Bloquear a troca', text: 'Só troca quando não há arquivos pendentes.', tag: 'Padrão' }, { value: 'carry', title: 'Levar alterações', text: 'Mantém suas alterações no novo ramo, se o Git permitir.' }, { value: 'stash', title: 'Guardar no stash', text: 'Guarda tudo no stash. Não reaplica automaticamente.' }] as const;
 function Switch({ c, vm }: Props) {
+  const noSwitchDialog = useRef<HTMLDialogElement>(null);
   const dirty = !!vm.status?.files.length;
   const current = vm.status?.branch ?? '';
   const target = vm.switchTarget.trim();
@@ -76,8 +77,13 @@ function Switch({ c, vm }: Props) {
   const rowsReady = rows.every(r => r.name && !r.error);
   const switching = !vm.dynamicBranches || vm.switchRow !== null;
   return <section className="card switch-card">
+    <dialog ref={noSwitchDialog} className="issue-dialog" aria-labelledby="no-switch-title">
+      <h2 id="no-switch-title">Nenhum ramo marcado para trocar</h2>
+      <p>Os ramos serão criados sem alterar o ramo atual. Deseja continuar?</p>
+      <div className="card-actions"><button autoFocus onClick={() => noSwitchDialog.current?.close()}>Voltar</button><button className="primary" onClick={() => { noSwitchDialog.current?.close(); void c.createBranches(); }}>Criar sem trocar</button></div>
+    </dialog>
     <div className="summary"><span>Atual <strong>⑂ {current || '—'}</strong></span><span className={dirty ? 'amber' : 'green'}>{dirty ? `${vm.status?.files.length} arquivos alterados` : 'Sem alterações locais'}</span><span>↑ {vm.status?.ahead ?? 0} para enviar · ↓ {vm.status?.behind ?? 0} para receber</span></div>
-    <label className="manual-check dynamic-toggle"><input type="checkbox" checked={vm.dynamicBranches} onChange={e => c.set({ dynamicBranches: e.target.checked })}/>Criação dinâmica de ramos <small>(até 4 de uma vez)</small></label>
+    <label className="manual-check dynamic-toggle"><input type="checkbox" checked={vm.dynamicBranches} onChange={e => c.setDynamicBranches(e.target.checked)}/>Criação dinâmica de ramos <small>(até 4 de uma vez)</small></label>
     {vm.dynamicBranches ? <div className="batch">
       {vm.branchRows.map((row, index) => <div className="batch-row" key={index}>
         <span className="step-number">{index + 1}</span>
@@ -100,7 +106,7 @@ function Switch({ c, vm }: Props) {
     {switching && <><p className="section-label">Se houver alterações locais</p><div className="mode-grid">{modes.map(mode => <label key={mode.value} className={`mode-card ${vm.switchMode === mode.value ? 'active' : ''}`}><input type="radio" name="mode" value={mode.value} checked={vm.switchMode === mode.value} onChange={() => c.set({ switchMode: mode.value })}/><div><strong>{mode.title}{'tag' in mode && <span>{mode.tag}</span>}</strong><p>{mode.text}</p></div></label>)}</div>
     {dirty && vm.switchMode === 'block' && <p className="inline-warning">Há arquivos sem commit. Faça o commit ou escolha outra opção acima.</p>}</>}
     <div className="card-actions"><p className="hint">{!switching ? 'Os ramos são criados sem trocar o ramo atual.' : c.installOnSwitch ? <>Depois da troca, roda <code>pman install -f</code> na pasta <code>source</code>.</> : null}</p>{c.usePman && <label className="manual-check"><input type="checkbox" checked={vm.installOnSwitch} onChange={e => c.set({ installOnSwitch: e.target.checked })}/>Executar pman ao trocar ramo</label>}{c.usePman && <button onClick={c.runPman}>Executar pman no ramo atual</button>}
-      {vm.dynamicBranches ? <button className="primary" disabled={!rowsReady || switching && blocked || !!vm.status?.operation} onClick={c.createBranches}>{`Criar ${vm.branchRows.length} ${vm.branchRows.length === 1 ? 'ramo' : 'ramos'}${vm.switchRow !== null ? ' e trocar' : ''} →`}</button>
+      {vm.dynamicBranches ? <button className="primary" disabled={!rowsReady || switching && blocked || !!vm.status?.operation} onClick={() => vm.switchRow === null ? noSwitchDialog.current?.showModal() : c.createBranches()}>{`Criar ${vm.branchRows.length} ${vm.branchRows.length === 1 ? 'ramo' : 'ramos'}${vm.switchRow !== null ? ' e trocar' : ''} →`}</button>
         : creating ? <button className="primary" disabled={!validName || !base || blocked} onClick={c.createBranch}>Criar ramo e trocar →</button> : <button className="primary" disabled={!target || blocked} onClick={c.switchBranch}>{c.installOnSwitch ? 'Trocar ramo e instalar →' : 'Trocar ramo →'}</button>}</div></section>;
 }
 function PullRequest({ c, vm }: Props) {
@@ -166,7 +172,7 @@ function ReviewComposer({ c, vm }: Props) {
   return <section className="card review-composer">
     <div className="card-heading"><div><h2>Mensagem para revisão</h2><p className="hint">Depois de criar os PRs no Azure, os links são consultados pela origem e pelo destino.</p></div><button disabled={!!issueError || pairs.some(pair => !pair.source.trim() || !pair.target.trim())} onClick={c.findPullRequests}>Buscar PRs e gerar mensagem</button></div>
     {issueError && <p className="inline-warning padded">{issueError}</p>}
-    {preview ? <><div className="review-message" aria-label="Prévia da mensagem"><p>{greeting()}, Tarefa finalizada</p>{preview.issue && <p>Tarefa disponível para revisão:<br/><ReviewLink c={c} url={preview.issue.url} label={preview.issue.key}/></p>}<p>PRs</p>{preview.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url}/></p>)}</div><div className="card-actions"><p className="hint">Cole com Ctrl+V para manter o código do Jira como link. A saudação usa o horário local no momento da cópia.</p><button className="primary" onClick={c.copyReview}>Copiar mensagem</button></div></> : <p className="hint padded">Os links finais e o texto aparecerão aqui. Sem Issue Jira, a mensagem terá a saudação e a lista de PRs.</p>}
+    {preview ? <><div className="review-message" aria-label="Prévia da mensagem"><p>{greeting()}, tarefa finalizada, disponível para revisão.</p>{preview.issue && <p>Issue do Jira:<br/><ReviewLink c={c} url={preview.issue.url} label={preview.issue.key}/></p>}<p>PRs:</p>{preview.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url}/></p>)}</div><div className="card-actions"><p className="hint">Cole com Ctrl+V para manter o código do Jira como link. A saudação usa o horário local no momento da cópia.</p><button className="primary" onClick={c.copyReview}>Copiar mensagem</button></div></> : <p className="hint padded">Os links finais e o texto aparecerão aqui. Sem Issue Jira, a mensagem terá a saudação e a lista de PRs.</p>}
   </section>;
 }
 function ReviewLink({ c, url, label }: { c: AppController; url: string; label?: string }) {
@@ -202,7 +208,10 @@ function ReviewHistory({ c, vm }: Props) {
       </form>}
     </dialog>
     {!groups.size && <p className="hint padded">{query ? 'Nenhuma mensagem encontrada.' : 'As mensagens geradas ficam salvas neste computador para copiar novamente.'}</p>}
-    {[...groups].map(([issue, messages]) => <details key={issue} open={!!query}><summary>{issue} <span className="pill">{messages.length} {messages.length === 1 ? 'mensagem' : 'mensagens'}</span></summary>{messages.map(message => <article key={message.id}><div className="history-message-heading"><strong>{message.repositoryName}</strong><small>{new Date(message.createdAt).toLocaleString('pt-BR')}</small><button onClick={() => { setEditing(message); setIssueValue(message.issue?.key ?? ""); setIssueError(""); }}>{message.issue ? "Alterar issue do jira" : "Adicionar issue"}</button><button onClick={() => c.copyPreviousReview(message.id)}>Copiar mensagem anterior</button></div>{message.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url}/></p>)}</article>)}</details>)}
+    {[...groups].map(([issue, messages]) => {
+      const jiraUrl = messages.find(message => message.issue)?.issue?.url;
+      return <details key={issue} open={!!query}><summary>{issue}{jiraUrl && <a className="issue-history-link" href={jiraUrl} aria-label={`Abrir issue ${issue} no Jira`} title="Abrir no Jira" onClick={event => { event.preventDefault(); event.stopPropagation(); void c.openReviewLink(jiraUrl); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 3h7v7M10 14 21 3"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg></a>} <span className="pill">{messages.length} {messages.length === 1 ? 'mensagem' : 'mensagens'}</span></summary>{messages.map(message => <article key={message.id}><div className="history-message-heading"><strong>{message.repositoryName}</strong><small>{new Date(message.createdAt).toLocaleString('pt-BR')}</small><button onClick={() => { setEditing(message); setIssueValue(message.issue?.key ?? ""); setIssueError(""); }}>{message.issue ? "Alterar issue do jira" : "Adicionar issue"}</button><button onClick={() => c.copyPreviousReview(message.id)}>Copiar mensagem anterior</button></div>{message.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url}/></p>)}</article>)}</details>;
+    })}
   </section>;
 }
 function Settings({ c, vm }: Props) {

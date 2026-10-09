@@ -141,6 +141,7 @@ it('compila o aplicativo e executa seleção → cherry-pick → push na interfa
     await expectUI(page.getByText('Mensagem copiada com o link formatado do Jira. Cole no Google Chat com Ctrl+V.', { exact: true })).toBeVisible();
     const copied = await app.evaluate(({ clipboard }) => ({ text: clipboard.readText(), html: clipboard.readHTML() }));
     expect(copied.html).toContain('href="https://jiraproducao.totvs.com.br/browse/DDVENDAS-61611">DDVENDAS-61611</a>');
+    expect(copied.text).toContain('<https://jiraproducao.totvs.com.br/browse/DDVENDAS-61611|DDVENDAS-61611>');
     expect(copied.text).toContain(`main: ${azureWeb}/pullrequest/870183`);
     const savedReviews = JSON.parse(await readFile(path.join(data, 'review-messages.json'), 'utf8'));
     expect(savedReviews).toHaveLength(1); expect(savedReviews[0].issue.key).toBe('DDVENDAS-61611');

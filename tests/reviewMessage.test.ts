@@ -21,12 +21,13 @@ describe('Mensagem de revisão', () => {
   it('gera texto completo e HTML com a issue clicável, sem expor marcação no texto simples', () => {
     const issue = parseJiraIssue('DDVENDAS-61611');
     const message = formatReviewMessage({ issue, prs }, new Date(2026, 9, 8, 12, 1));
-    expect(message.text).toBe(`Boa tarde, Tarefa finalizada\n\nTarefa disponível para revisão:\n${issue!.url}\n\nPRs\n\nsupport/37: ${prs[0].url}\n\nmaster: ${prs[1].url}`);
+    expect(message.text).toBe(`Boa tarde, tarefa finalizada, disponível para revisão.\n\nIssue do Jira:\n<${issue!.url}|DDVENDAS-61611>\n\nPRs:\n\nsupport/37: ${prs[0].url}\n\nmaster: ${prs[1].url}`);
+    expect(message.text).not.toContain(`Issue do Jira:\n${issue!.url}`);
     expect(message.html).toContain(`<a href="${issue!.url}">DDVENDAS-61611</a>`);
     expect(message.text).not.toContain('<a');
     const without = formatReviewMessage({ prs }, new Date(2026, 9, 8, 6));
-    expect(without.text).toBe(`Bom dia, Tarefa finalizada\n\nPRs\n\nsupport/37: ${prs[0].url}\n\nmaster: ${prs[1].url}`);
-    expect(without.html).not.toContain('Tarefa disponível');
+    expect(without.text).toBe(`Bom dia, tarefa finalizada, disponível para revisão.\n\nPRs:\n\nsupport/37: ${prs[0].url}\n\nmaster: ${prs[1].url}`);
+    expect(without.html).not.toContain('Issue do Jira:');
     expect(formatReviewMessage({ prs: [{ target: '<img src=x>', url: prs[0].url }] }).html).toContain('&lt;img src=x&gt;');
   });
   it('não aceita URL de criação, protocolo inseguro ou destino ausente', () => {
@@ -48,7 +49,7 @@ describe('Mensagem de revisão', () => {
     expect(without.issue).toBeUndefined();
     const copied = await restarted.copy(first.id);
     expect(copied.html).toContain('>DDVENDAS-61611</a>');
-    expect(copied.text).toContain(`${greeting()}, Tarefa finalizada`);
+    expect(copied.text).toContain(`${greeting()}, tarefa finalizada, disponível para revisão.`);
     await expect(restarted.copy('missing')).rejects.toThrow('não encontrada');
     await expect(restarted.save(first.repoPath, { issue: '', prs: [{ target: 'main', url: 'https://other.invalid/_git/r/pullrequest/1' }] })).rejects.toThrow('repositório selecionado');
     await expect(restarted.save(first.repoPath, { issue: '', prs: [prs[0], prs[0]] })).rejects.toThrow('repetidos');

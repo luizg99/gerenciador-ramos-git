@@ -32,6 +32,7 @@ function savePreferences(state: ViewModel) {
   try { localStorage.setItem('preferences', JSON.stringify(Object.fromEntries(preferenceKeys.map(key => [key, state[key]])))); } catch { /* sem armazenamento: só não lembra */ }
 }
 export class AppController {
+  private readonly initialPreferences = loadPreferences();
   private listeners = new Set<() => void>();
   private loadToken = 0;
   private stageQueue: Promise<void> = Promise.resolve();
@@ -41,9 +42,9 @@ export class AppController {
     switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], selectedCommit: '', selectedCommitFile: '', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
     commitMessage: '', workingFile: '', workingStaged: false, workingDiff: '', progress: [], manualConfirmed: false, loadingRepository: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
-    dynamicBranches: false, branchRows: [{ name: '', base: '' }], switchRow: null, dynamicPr: false, prRows: [{ source: '', target: '' }],
+    dynamicBranches: false, branchRows: [{ name: '', base: '' }], switchRow: this.initialPreferences.dynamicBranches ? 0 : null, dynamicPr: false, prRows: [{ source: '', target: '' }],
     jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: '',
-    ...loadPreferences()
+    ...this.initialPreferences
   };
   constructor(private api: Api) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -135,7 +136,7 @@ export class AppController {
   selectRepository = (id: string) => this.action(async () => {
     await this.api.selectRepository(id);
     this.set({ jiraIssue: '', prUrl: '', generatedReview: undefined });
-    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', detail: undefined, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: [{ name: '', base: '' }], switchRow: null, prRows: [{ source: '', target: '' }], workingFile: '', workingDiff: '', commitMessage: '', progress: [], manualConfirmed: false, tab: 'switch' });
+    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', detail: undefined, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, prRows: [{ source: '', target: '' }], workingFile: '', workingDiff: '', commitMessage: '', progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
   selectTab = (tab: Tab) => { this.set({ tab, detail: undefined, selectedCommit: '' }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
@@ -169,10 +170,11 @@ export class AppController {
   }
   // Criação dinâmica: até 4 ramos, cada um com sua base; no máximo um vira o ramo atual.
   setBranchRow = (index: number, patch: Partial<BranchRow>) => this.set({ branchRows: this.state.branchRows.map((row, i) => i === index ? { ...row, ...patch } : row) });
+  setDynamicBranches = (enabled: boolean) => this.set({ dynamicBranches: enabled, ...(enabled && this.state.switchRow === null && this.state.branchRows.length ? { switchRow: 0 } : {}) });
   addBranchRow = () => { if (this.state.branchRows.length < 4) this.set({ branchRows: [...this.state.branchRows, { name: '', base: '' }] }); };
   removeBranchRow = (index: number) => {
     const rows = this.state.branchRows.filter((_, i) => i !== index); const current = this.state.switchRow;
-    this.set({ branchRows: rows.length ? rows : [{ name: '', base: '' }], switchRow: current === null || current === index ? null : current > index ? current - 1 : current });
+    this.set({ branchRows: rows.length ? rows : [{ name: '', base: '' }], switchRow: current === null ? null : current === index ? rows.length ? 0 : null : current > index ? current - 1 : current });
   };
   toggleSwitchRow = (index: number) => this.set({ switchRow: this.state.switchRow === index ? null : index });
   createBranches = () => this.action(async () => {
@@ -183,7 +185,7 @@ export class AppController {
     if (result.published.length) parts.push(`Enviados para o remoto: ${result.published.join(', ')}.`);
     if (result.branch) parts.push(`Ramo atual: ${result.branch}${this.installOnSwitch ? ', dependências instaladas' : ''}.`);
     if (result.stash) parts.push(`Stash preservado: ${result.stash.slice(0, 10)}.`);
-    this.set({ notice: parts.join(' '), branchRows: [{ name: '', base: '' }], switchRow: null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
+    this.set({ notice: parts.join(' '), branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
   }, true, 'Criando ramos…');
   // PR dinâmico: até 4 pares origem → destino, abertos de uma vez.
   setPrRow = (index: number, patch: Partial<PrRow>) => this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch, url: undefined } : row) });
