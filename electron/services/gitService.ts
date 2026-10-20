@@ -1,4 +1,4 @@
-import { access, readFile, rm, stat } from 'node:fs/promises';
+import { access, lstat, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { BatchResult, Branch, Commit, CommitDetail, FileChange, PullRequestInfo, Status, SwitchMode, SwitchResult } from '../../src/models/domain';
 import { azureRepoWebUrl, pullRequestCreateUrl } from './azure';
@@ -97,10 +97,13 @@ export class GitService {
   }
   private async runPmanInner(repo: string) {
     if (!this.usePman) throw new Error('O pman está desativado em Configurações.');
+    const cwd = path.join(repo, 'source');
+    const source = await lstat(cwd).catch(() => null);
+    if (!source?.isDirectory() || source.isSymbolicLink()) throw new Error('O ramo foi alterado, mas a pasta source não existe ou é um link. Corrija e tente a instalação novamente.');
+    this.report(repo, 'Excluindo source/lib permanentemente…');
+    await rm(path.join(cwd, 'lib'), { recursive: true, force: true });
     this.report(repo, 'Executando pman install -f em source…');
     if (this.pmanOverride) return this.pmanOverride(repo);
-    const cwd = path.join(repo, 'source');
-    if (!await stat(cwd).then(s => s.isDirectory()).catch(() => false)) throw new Error('O ramo foi alterado, mas a pasta source não existe. Corrija e tente a instalação novamente.');
     // The shell receives only this constant command; no repository path or user text is interpolated.
     if (process.platform === 'win32') await runProcess('cmd.exe', ['/d', '/s', '/c', 'pman install -f'], cwd, s => this.report(repo, s), 15 * 60_000);
     else await runProcess('pman', ['install', '-f'], cwd, s => this.report(repo, s), 15 * 60_000);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GitService } from '../electron/services/gitService';
 import { scanRepositories } from '../electron/services/repositoryScanner';
@@ -30,6 +30,20 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await expect(service.switchBranch(f.repo, 'main', 'block')).rejects.toThrow('Ramo atual: main'); expect(await git(f.repo, 'branch', '--show-current')).toBe('main');
     fail = false; await service.runPman(f.repo); expect(await git(f.repo, 'branch', '--show-current')).toBe('main');
   });
+  it('exclui source/lib permanentemente antes de cada instalação do pman', async () => {
+    const f = await fixture(); const lib = path.join(f.repo, 'source', 'lib');
+    const seen: boolean[] = [];
+    const service = new GitService(undefined, async () => {
+      seen.push(await stat(lib).then(() => true).catch(() => false));
+      await mkdir(lib); await writeFile(path.join(lib, 'gerado.txt'), 'novo');
+    });
+    await mkdir(lib); await writeFile(path.join(lib, 'antigo.txt'), 'antigo');
+    await service.runPman(f.repo);
+    expect(seen).toEqual([false]);
+    await expect(readFile(path.join(lib, 'antigo.txt'))).rejects.toThrow();
+    await service.runPman(f.repo);
+    expect(seen).toEqual([false, false]);
+  });
   it('lista e cria ramo remoto localmente acompanhando seu upstream', async () => {
     const f = await fixture(); const service = new GitService(undefined, async () => {});
     await git(f.repo, 'push', 'origin', `${f.base}:refs/heads/DDVENDAS-999-main`);
@@ -50,6 +64,16 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     expect(await git(f.remote, 'show', `${f.source}:[a].txt`)).toBe('arquivo literal');
     expect((await service.status(f.repo)).files.map(f => f.path)).toEqual(['a.txt']);
     await expect(service.stage(f.repo, ['../fora.txt'], false)).rejects.toThrow('lista de alterações');
+  });
+  it('preserva os bytes UTF-8 com acentos ao preparar e criar um commit', async () => {
+    const f = await fixture(); const service = new GitService();
+    const content = 'Projeto\nAção, coração e informação: ç á é ã õ\n';
+    await writeFile(path.join(f.repo, 'README.md'), content, 'utf8');
+    await service.stage(f.repo, ['README.md'], false);
+    expect(await service.workingDiff(f.repo, 'README.md', true)).toContain('+Ação, coração e informação: ç á é ã õ');
+    await service.commit(f.repo, 'Preserva acentuação');
+    expect(await git(f.repo, 'show', 'HEAD:README.md')).toBe(content.trim());
+    expect(await readFile(path.join(f.repo, 'README.md'), 'utf8')).toBe(content);
   });
   it('detecta cherry-pick externo em andamento e impede a troca', async () => {
     const f = await fixture(); const service = new GitService(undefined, async () => {});

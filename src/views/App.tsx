@@ -105,7 +105,7 @@ function Switch({ c, vm }: Props) {
     </>}
     {switching && <><p className="section-label">Se houver alterações locais</p><div className="mode-grid">{modes.map(mode => <label key={mode.value} className={`mode-card ${vm.switchMode === mode.value ? 'active' : ''}`}><input type="radio" name="mode" value={mode.value} checked={vm.switchMode === mode.value} onChange={() => c.set({ switchMode: mode.value })}/><div><strong>{mode.title}{'tag' in mode && <span>{mode.tag}</span>}</strong><p>{mode.text}</p></div></label>)}</div>
     {dirty && vm.switchMode === 'block' && <p className="inline-warning">Há arquivos sem commit. Faça o commit ou escolha outra opção acima.</p>}</>}
-    <div className="card-actions"><p className="hint">{!switching ? 'Os ramos são criados sem trocar o ramo atual.' : c.installOnSwitch ? <>Depois da troca, roda <code>pman install -f</code> na pasta <code>source</code>.</> : null}</p>{c.usePman && <label className="manual-check"><input type="checkbox" checked={vm.installOnSwitch} onChange={e => c.set({ installOnSwitch: e.target.checked })}/>Executar pman ao trocar ramo</label>}{c.usePman && <button onClick={c.runPman}>Executar pman no ramo atual</button>}
+    <div className="card-actions"><p className="hint">{!switching ? 'Os ramos são criados sem trocar o ramo atual.' : c.installOnSwitch ? <>Depois da troca, exclui <code>source/lib</code> permanentemente e roda <code>pman install -f</code> em <code>source</code>.</> : null}</p>{c.usePman && <label className="manual-check"><input type="checkbox" checked={vm.installOnSwitch} onChange={e => c.set({ installOnSwitch: e.target.checked })}/>Executar pman ao trocar ramo</label>}{c.usePman && <button onClick={c.runPman}>Executar pman no ramo atual</button>}
       {vm.dynamicBranches ? <button className="primary" disabled={!rowsReady || switching && blocked || !!vm.status?.operation} onClick={() => vm.switchRow === null ? noSwitchDialog.current?.showModal() : c.createBranches()}>{`Criar ${vm.branchRows.length} ${vm.branchRows.length === 1 ? 'ramo' : 'ramos'}${vm.switchRow !== null ? ' e trocar' : ''} →`}</button>
         : creating ? <button className="primary" disabled={!validName || !base || blocked} onClick={c.createBranch}>Criar ramo e trocar →</button> : <button className="primary" disabled={!target || blocked} onClick={c.switchBranch}>{c.installOnSwitch ? 'Trocar ramo e instalar →' : 'Trocar ramo →'}</button>}</div></section>;
 }
@@ -216,7 +216,7 @@ function ReviewHistory({ c, vm }: Props) {
 }
 function Settings({ c, vm }: Props) {
   return <section className="card switch-card">
-    <label className="setting-row"><input type="checkbox" checked={c.usePman} onChange={e => c.setUsePman(e.target.checked)}/><div><strong>Usa pman</strong><p>Quando marcado, toda troca ou criação de ramo na aba <em>Criar / Alterar ramo</em> executa <code>pman install -f</code> na pasta <code>source</code>, e o botão para rodar o pman manualmente aparece. Desmarcado, o pman não é executado em nenhum momento.</p></div></label>
+    <label className="setting-row"><input type="checkbox" checked={c.usePman} onChange={e => c.setUsePman(e.target.checked)}/><div><strong>Usa pman</strong><p>Quando marcado, toda troca ou criação de ramo na aba <em>Criar / Alterar ramo</em> exclui <code>source/lib</code> permanentemente antes de executar <code>pman install -f</code> em <code>source</code>. O botão manual segue a mesma ordem. Desmarcado, o pman não é executado em nenhum momento.</p></div></label>
   </section>;
 }
 function History({ c, vm }: Props) { return <section className="card"><div className="toolbar"><BranchPicker label="Histórico do ramo" value={vm.historyRef} branches={vm.branches} onChange={historyRef => c.set({ historyRef })}/><button onClick={() => c.loadHistory(vm.historyRef)}>Carregar histórico</button></div><div className="split"><div><CommitList commits={vm.history} active={vm.selectedCommit} onInspect={c.showCommit}/>{!!vm.history.length && <button className="load-more" onClick={() => c.loadHistory(vm.historyRef, true)}>Carregar mais commits</button>}</div><Detail detail={vm.detail} selectedFile={vm.selectedCommitFile} onSelectFile={c.showCommitFile}/></div></section>; }
@@ -225,6 +225,7 @@ function Changes({ c, vm }: Props) {
   const files = vm.status?.files ?? [];
   const isStaged = (f: FileChange) => f.index !== ' ' && f.index !== '?';
   const staged = files.filter(isStaged);
+  const partial = staged.filter(f => f.worktree !== ' ');
   // Marcado = vai no commit (está no índice); parcial = parte preparada, parte não.
   const state = (f: FileChange) => !isStaged(f) ? 'off' : f.worktree === ' ' ? 'on' : 'partial';
   const allOn = files.length > 0 && files.every(f => state(f) === 'on');
@@ -234,7 +235,8 @@ function Changes({ c, vm }: Props) {
   const row = (f: FileChange) => {
     const code = isStaged(f) ? f.index : f.worktree === '?' ? 'N' : f.worktree;
     const slash = f.path.lastIndexOf('/');
-    const showStaged = f.worktree === ' ';
+    // Em arquivos parcialmente preparados, mostrar primeiro o que entrará no commit.
+    const showStaged = isStaged(f);
     return <div className={`file-row ${vm.workingFile === f.path ? 'selected' : ''}`} key={f.path}>
       <input type="checkbox" aria-label={`Incluir ${f.path} no commit`} title={state(f) === 'partial' ? 'Parte das alterações está preparada. Marque para incluir tudo.' : 'Incluir no commit'} checked={state(f) === 'on'} ref={el => { if (el) el.indeterminate = state(f) === 'partial'; }} onChange={() => toggle(f)}/>
       <span className={`file-status s-${code}`} title={statusLabels[code] ?? code}>{code}</span>
@@ -249,7 +251,7 @@ function Changes({ c, vm }: Props) {
       {confirm && <div className="confirm-discard" role="alertdialog" aria-label="Confirmar descarte"><p>{confirmText} {confirm.length === 1 ? 'O arquivo volta ao último commit (se for novo, é apagado).' : 'Os arquivos voltam ao último commit e os novos são apagados.'} <strong>Não dá para desfazer.</strong></p><div><button onClick={() => setConfirm(null)}>Cancelar</button><button className="danger-solid" onClick={discard}>Descartar</button></div></div>}
       {files.map(row)}
     </div>}
-    <div className="commit-form"><textarea aria-label="Mensagem do commit" rows={3} placeholder="Mensagem do commit" value={vm.commitMessage} onChange={e => c.set({ commitMessage: e.target.value })}/>
+    <div className="commit-form">{!!partial.length && <p className="inline-warning">{partial.length} {partial.length === 1 ? 'arquivo tem' : 'arquivos têm'} alterações preparadas e pendentes. Abra o arquivo e confira a aba <strong>Marcadas</strong> antes de criar o commit.</p>}<textarea aria-label="Mensagem do commit" rows={3} placeholder="Mensagem do commit" value={vm.commitMessage} onChange={e => c.set({ commitMessage: e.target.value })}/>
       <div className="card-actions"><span className="hint">{staged.length ? `${staged.length} de ${files.length} ${files.length === 1 ? 'arquivo marcado' : 'arquivos marcados'}` : 'Marque os arquivos que vão no commit'}</span><button onClick={c.push} title="Envia os commits locais para o upstream do ramo (ou origin, se ainda não configurado)">↑ Enviar{vm.status?.ahead ? ` (${vm.status.ahead})` : ''}</button><button className="primary" disabled={!staged.length || !vm.commitMessage.trim()} onClick={c.commit}>Criar commit</button></div></div>
   </section>
   <section className="card diff-card">{vm.workingFile ? <><div className="card-heading"><h2>{vm.workingFile}</h2>{files.some(f => f.path === vm.workingFile && state(f) === 'partial') ? <div className="segmented"><button className={!vm.workingStaged ? 'active' : ''} onClick={() => c.showWorkingDiff(vm.workingFile, false)}>Não marcadas</button><button className={vm.workingStaged ? 'active' : ''} onClick={() => c.showWorkingDiff(vm.workingFile, true)}>Marcadas</button></div> : null}</div><Diff value={vm.workingDiff || 'Nenhuma alteração nesta comparação.'}/></> : <div className="empty"><span className="empty-symbol">±</span><p>Selecione um arquivo para ver as alterações.</p></div>}</section></div>;

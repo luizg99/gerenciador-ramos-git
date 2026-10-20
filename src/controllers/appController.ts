@@ -87,7 +87,7 @@ export class AppController {
       if (!workingFile) return;
       const file = status.files.find(f => f.path === workingFile);
       if (!file) { this.set({ workingFile: '', workingDiff: '' }); return; }
-      const staged = file.worktree === ' ';
+      const staged = file.index !== ' ' && file.index !== '?';
       const diff = await this.api.workingDiff(id, workingFile, staged);
       if (this.repository?.id === id && this.state.workingFile === workingFile && !this.pendingStages && (diff !== this.state.workingDiff || staged !== this.state.workingStaged)) this.set({ workingDiff: diff, workingStaged: staged });
     } catch { /* falhas transitórias (ex.: git ocupado) são ignoradas; a próxima consulta tenta de novo */ }
@@ -305,7 +305,10 @@ export class AppController {
       if (this.pendingStages || this.repository?.id !== id) return;
       this.set({ status });
       const file = status.files.find(f => f.path === this.state.workingFile);
-      if (file && touched.includes(file.path)) this.set({ workingDiff: await this.api.workingDiff(id, file.path, file.worktree === ' '), workingStaged: file.worktree === ' ' });
+      if (file && touched.includes(file.path)) {
+        const staged = file.index !== ' ' && file.index !== '?';
+        this.set({ workingDiff: await this.api.workingDiff(id, file.path, staged), workingStaged: staged });
+      }
       else if (!file && this.state.workingFile) this.set({ workingFile: '', workingDiff: '' });
     } catch (error) { if (this.repository?.id === id) this.set({ error: (error as Error).message }); }
   }
