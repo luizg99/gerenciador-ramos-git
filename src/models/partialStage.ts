@@ -24,27 +24,40 @@ export function changeBlocks(diff: string): ChangeBlock[] {
   return result;
 }
 
-// Keep the other changes as context from the side that currently exists in the index.
-export function selectedBlockPatch(diff: string, hunkIndex: number, blockIndex: number, reverse: boolean): string {
+export interface BlockSelection { hunk: number; block: number }
+
+// Keep unselected changes as context from the side where the patch will be applied.
+export function selectedBlocksPatch(diff: string, selections: BlockSelection[], reverse: boolean): string {
   const lines = diff.split('\n');
   const header = lines.findIndex(line => line.startsWith('--- '));
   const starts = lines.flatMap((line, i) => line.startsWith('@@ ') ? [i] : []);
-  const start = starts[hunkIndex], end = starts[hunkIndex + 1] ?? lines.length;
-  const selected = changeBlocks(diff).find(b => b.hunk === hunkIndex && b.block === blockIndex);
-  if (header < 0 || start === undefined || !selected || selected.lines.some(i => i >= end)) throw new Error('Trecho do diff inválido. Atualize a comparação.');
-  const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(lines[start]);
-  if (!match) throw new Error('Cabeçalho do diff inválido.');
-  const body: string[] = [], selectedLines = new Set(selected.lines);
-  for (let i = start + 1; i < end; i++) {
-    const line = lines[i];
-    if (line.startsWith('diff --git ') || line.startsWith('\\ No newline')) continue;
-    if (line.startsWith(' ')) body.push(line);
-    else if (line.startsWith('+') || line.startsWith('-')) {
-      if (selectedLines.has(i)) body.push(line);
-      else if (line[0] === (reverse ? '+' : '-')) body.push(' ' + line.slice(1));
+  const blocks = changeBlocks(diff);
+  const selected = selections.map(({ hunk, block }) => blocks.find(b => b.hunk === hunk && b.block === block));
+  if (!selections.length || selections.length > 2000 || selected.some(b => !b) || new Set(selections.map(s => `${s.hunk}:${s.block}`)).size !== selections.length || header < 0) throw new Error('Seleção do diff inválida. Atualize a comparação.');
+  const patch = lines.slice(0, header + 2);
+  for (const hunkIndex of [...new Set(selections.map(s => s.hunk))].sort((a, b) => a - b)) {
+    const start = starts[hunkIndex], end = starts[hunkIndex + 1] ?? lines.length;
+    if (start === undefined) throw new Error('Trecho do diff inválido.');
+    const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(lines[start]);
+    if (!match) throw new Error('Cabeçalho do diff inválido.');
+    const selectedLines = new Set(selected.filter(b => b?.hunk === hunkIndex).flatMap(b => b!.lines));
+    const body: string[] = [];
+    for (let i = start + 1; i < end; i++) {
+      const line = lines[i];
+      if (line.startsWith('diff --git ') || line.startsWith('\\ No newline')) continue;
+      if (line.startsWith(' ')) body.push(line);
+      else if (line.startsWith('+') || line.startsWith('-')) {
+        if (selectedLines.has(i)) body.push(line);
+        else if (line[0] === (reverse ? '+' : '-')) body.push(' ' + line.slice(1));
+      }
     }
+    const oldCount = body.filter(line => line[0] !== '+').length;
+    const newCount = body.filter(line => line[0] !== '-').length;
+    patch.push(`@@ -${match[1]},${oldCount} +${match[2]},${newCount} @@`, ...body);
   }
-  const oldCount = body.filter(line => line[0] !== '+').length;
-  const newCount = body.filter(line => line[0] !== '-').length;
-  return [...lines.slice(0, header + 2), `@@ -${match[1]},${oldCount} +${match[2]},${newCount} @@`, ...body, ''].join('\n');
+  return [...patch, ''].join('\n');
+}
+
+export function selectedBlockPatch(diff: string, hunk: number, block: number, reverse: boolean): string {
+  return selectedBlocksPatch(diff, [{ hunk, block }], reverse);
 }

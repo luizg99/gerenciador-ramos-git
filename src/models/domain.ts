@@ -36,6 +36,7 @@ export interface Api {
   workingDiff(id: string, file: string, staged: boolean): Promise<string>;
   stage(id: string, files: string[], unstage: boolean): Promise<void>;
   stageBlock(id: string, file: string, staged: boolean, hunk: number, block: number, expectedDiff: string): Promise<void>;
+  editBlocks(id: string, file: string, staged: boolean, selections: { hunk: number; block: number }[], action: 'stage' | 'unstage' | 'discard', expectedDiff: string): Promise<void>;
   discard(id: string, files: string[]): Promise<void>;
   cancelOperation(id: string): Promise<void>;
   createBranch(id: string, name: string, base: string, mode: SwitchMode, publish: boolean, install: boolean): Promise<SwitchResult & { published: boolean }>;

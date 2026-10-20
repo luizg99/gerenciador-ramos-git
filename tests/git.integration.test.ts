@@ -104,6 +104,41 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     expect(await git(f.repo, 'show', ':linhas.txt')).toBe('um\nDOIS\ntres');
     expect(await readFile(file, 'utf8')).toBe('UM\nDOIS\ntres\n');
   });
+  it('seleciona linhas em massa e descarta mudanças sem deixar o reverso no diff', async () => {
+    const f = await fixture(); const service = new GitService();
+    const file = path.join(f.repo, 'bulk.txt');
+    const base = Array.from({ length: 12 }, (_, i) => `linha ${i + 1}`);
+    await writeFile(file, base.join('\n') + '\n');
+    await service.stage(f.repo, ['bulk.txt'], false); await service.commit(f.repo, 'Base para seleção em massa');
+    const edited = [...base]; edited[0] = 'LINHA 1'; edited[1] = 'LINHA 2'; edited[10] = 'LINHA 11';
+    await writeFile(file, edited.join('\n') + '\n');
+    const diff = await service.workingDiff(f.repo, 'bulk.txt', false);
+    await service.editBlocks(f.repo, 'bulk.txt', false, [{ hunk: 0, block: 0 }, { hunk: 0, block: 1 }], 'stage', diff);
+    expect(await git(f.repo, 'show', ':bulk.txt')).toContain('LINHA 1\nLINHA 2\n');
+    expect(await git(f.repo, 'show', ':bulk.txt')).toContain('linha 11');
+    const remaining = await service.workingDiff(f.repo, 'bulk.txt', false);
+    await service.editBlocks(f.repo, 'bulk.txt', false, [{ hunk: 0, block: 0 }], 'discard', remaining);
+    expect(await readFile(file, 'utf8')).toContain('linha 11\n');
+    expect(await service.workingDiff(f.repo, 'bulk.txt', false)).toBe('');
+    const staged = await service.workingDiff(f.repo, 'bulk.txt', true);
+    await service.editBlocks(f.repo, 'bulk.txt', true, [{ hunk: 0, block: 0 }], 'discard', staged);
+    expect(await git(f.repo, 'show', ':bulk.txt')).toContain('linha 1\nLINHA 2\n');
+    expect(await readFile(file, 'utf8')).toContain('linha 1\nLINHA 2\n');
+    expect(await service.workingDiff(f.repo, 'bulk.txt', false)).toBe('');
+    expect(await service.workingDiff(f.repo, 'bulk.txt', true)).not.toContain('+LINHA 1');
+  });
+  it('seleciona mudanças de hunks separados na mesma operação', async () => {
+    const f = await fixture(); const service = new GitService();
+    const file = path.join(f.repo, 'hunks.txt');
+    const base = Array.from({ length: 20 }, (_, i) => `linha ${i + 1}`);
+    await writeFile(file, base.join('\n') + '\n');
+    await service.stage(f.repo, ['hunks.txt'], false); await service.commit(f.repo, 'Base para hunks');
+    const edited = [...base]; edited[0] = 'LINHA 1'; edited[19] = 'LINHA 20';
+    await writeFile(file, edited.join('\n') + '\n');
+    await service.editBlocks(f.repo, 'hunks.txt', false, [{ hunk: 0, block: 0 }, { hunk: 1, block: 0 }], 'stage', await service.workingDiff(f.repo, 'hunks.txt', false));
+    expect(await git(f.repo, 'show', ':hunks.txt')).toBe(edited.join('\n'));
+    expect(await service.workingDiff(f.repo, 'hunks.txt', false)).toBe('');
+  });
   it('detecta cherry-pick externo em andamento e impede a troca', async () => {
     const f = await fixture(); const service = new GitService(undefined, async () => {});
     await git(f.repo, 'switch', 'dev'); await change(f.repo, 'shared.txt', 'conflito', 'Conflito'); await expect(git(f.repo, 'cherry-pick', f.second)).rejects.toThrow();

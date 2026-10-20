@@ -5,9 +5,9 @@ export function BranchPicker({ label, value, branches, onChange, disabled = fals
   const id = useId();
   return <label className="field"><span>{label}</span><input aria-label={label} value={value} onChange={e => onChange(e.target.value)} list={id} disabled={disabled} placeholder={placeholder} autoComplete="off" spellCheck={false}/><datalist id={id}>{branches.map(b => <option key={b.ref} value={b.name}>{b.remote ? 'Remoto' : 'Local'}{b.current ? ' · atual' : ''}</option>)}</datalist></label>;
 }
-export function Diff({ value, onBlock, blockAction }: { value: string; onBlock?: (hunk: number, block: number) => void; blockAction?: string }) {
+export function Diff({ value, selectedBlocks = [], onToggleBlock }: { value: string; selectedBlocks?: { hunk: number; block: number }[]; onToggleBlock?: (hunk: number, block: number) => void }) {
   const lines = value.split(/\r?\n/);
-  const blockStarts = new Map(onBlock ? changeBlocks(value).map(b => [b.start, b]) : []);
+  const blockStarts = new Map(onToggleBlock ? changeBlocks(value).map(b => [b.start, b]) : []);
   // Numeração antiga/nova a partir dos cabeçalhos "@@ -a,b +c,d @@".
   let header = false, inHunk = false, oldLine = 0, newLine = 0;
   const parse = (line: string): { kind: string; old?: number; new?: number } => {
@@ -21,7 +21,7 @@ export function Diff({ value, onBlock, blockAction }: { value: string; onBlock?:
     if (line.startsWith(' ')) return { kind: '', old: oldLine++, new: newLine++ };
     return { kind: 'meta' };
   };
-  return <div className="diff-wrap">{onBlock && blockStarts.size > 0 && <p className="diff-action-hint">{blockAction === 'Retirar do commit' ? 'Clique em − para retirar uma mudança do commit. O arquivo no disco permanece igual.' : 'Clique em + para incluir uma mudança no commit.'}</p>}{lines.length > 8000 && <p className="hint">Prévia limitada a 8.000 linhas. Revise o restante no editor.</p>}<pre className="diff"><code className="diff-lines">{lines.slice(0, 8000).map((line, i) => { const row = parse(line); const block = blockStarts.get(i); return <span key={i} className={`diff-line ${row.kind}`}><span className="ln" aria-hidden="true">{row.old ?? ''}</span><span className="ln" aria-hidden="true">{row.new ?? ''}</span>{onBlock && <span className="diff-action-slot">{block && <button type="button" className="diff-block-action" title={blockAction} aria-label={`${blockAction}: linha ${row.old ?? row.new}`} onClick={() => onBlock(block.hunk, block.block)}>{blockAction === 'Retirar do commit' ? '−' : '+'}</button>}</span>}<span className="code">{line || ' '}</span></span>; })}</code></pre></div>;
+  return <div className="diff-wrap">{onToggleBlock && blockStarts.size > 0 && <p className="diff-action-hint">Selecione uma ou mais mudanças pelas caixas ao lado das linhas.</p>}{lines.length > 8000 && <p className="hint">Prévia limitada a 8.000 linhas. Revise o restante no editor.</p>}<pre className="diff"><code className="diff-lines">{lines.slice(0, 8000).map((line, i) => { const row = parse(line); const block = blockStarts.get(i); return <span key={i} className={`diff-line ${row.kind}`}><span className="ln" aria-hidden="true">{row.old ?? ''}</span><span className="ln" aria-hidden="true">{row.new ?? ''}</span>{onToggleBlock && <span className="diff-action-slot">{block && <input type="checkbox" className="diff-block-check" aria-label={`Selecionar mudança na linha ${row.old ?? row.new}`} checked={selectedBlocks.some(s => s.hunk === block.hunk && s.block === block.block)} onChange={() => onToggleBlock(block.hunk, block.block)}/>}</span>}<span className="code">{line || ' '}</span></span>; })}</code></pre></div>;
 }
 export function CommitList({ commits, selected = [], active, selectable, onSelect, onInspect }: { commits: Commit[]; selected?: string[]; active?: string; selectable?: boolean; onSelect?: (hash: string) => void; onInspect: (hash: string) => void }) {
   return <div className="commit-list">{commits.length === 0 ? <div className="empty small">Nenhum commit carregado.</div> : commits.map(commit => <div className={`commit-row ${active === commit.hash ? 'active' : ''}`} key={commit.hash}>

@@ -21,6 +21,7 @@ const api: Api = {
   workingDiff: (id, file, staged) => call('git:workingDiff', id, file, staged) as Promise<string>,
   stage: (id, files, unstage) => call('git:stage', id, files, unstage) as Promise<void>,
   stageBlock: (id, file, staged, hunk, block, diff) => call('git:stageBlock', id, file, staged, hunk, block, diff) as Promise<void>,
+  editBlocks: (id, file, staged, selections, action, diff) => call('git:editBlocks', id, file, staged, selections, action, diff) as Promise<void>,
   cancelOperation: id => call('git:cancelOperation', id) as Promise<void>,
   discard: (id, files) => call('git:discard', id, files) as Promise<void>,
   createBranch: (id, name, base, mode, publish, install) => call('git:createBranch', id, name, base, mode, publish, install) as ReturnType<Api['createBranch']>,

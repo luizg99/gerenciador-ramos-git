@@ -319,15 +319,16 @@ export class AppController {
   }, true, 'Descartando alterações…');
   cancelOperation = () => this.action(async () => { await this.api.cancelOperation(this.id); this.set({ notice: 'Operação Git cancelada.' }); }, true, 'Cancelando operação…');
   showWorkingDiff = (file: string, staged: boolean) => this.action(async () => { this.set({ workingDiff: await this.api.workingDiff(this.id, file, staged), workingFile: file, workingStaged: staged }); });
-  stageBlock = (hunk: number, block: number) => this.action(async () => {
+  editBlocks = (selections: { hunk: number; block: number }[], action: 'stage' | 'unstage' | 'discard') => this.action(async () => {
     await this.stageQueue;
     const id = this.id, { workingFile: file, workingStaged: staged, workingDiff: diff } = this.state;
-    await this.api.stageBlock(id, file, staged, hunk, block, diff);
+    await this.api.editBlocks(id, file, staged, selections, action, diff);
     const status = await this.api.status(id);
     const change = status.files.find(f => f.path === file);
-    const nextStaged = change && (staged ? change.index !== ' ' && change.index !== '?' : change.worktree === ' ' && change.index !== ' ' && change.index !== '?');
-    this.set({ status, workingStaged: !!nextStaged, workingDiff: change ? await this.api.workingDiff(id, file, !!nextStaged) : '', workingFile: change ? file : '' });
-  }, false, 'Atualizando trecho…');
+    const hasStaged = !!change && change.index !== ' ' && change.index !== '?';
+    const nextStaged = staged ? hasStaged : !!change && change.worktree === ' ' && hasStaged;
+    this.set({ status, workingStaged: nextStaged, workingDiff: change ? await this.api.workingDiff(id, file, nextStaged) : '', workingFile: change ? file : '', notice: action === 'discard' ? `${selections.length} ${selections.length === 1 ? 'mudança descartada' : 'mudanças descartadas'} do arquivo.` : '' });
+  }, false, action === 'discard' ? 'Descartando mudanças…' : 'Atualizando seleção…');
   commit = () => this.action(async () => { await this.stageQueue; await this.api.commit(this.id, this.state.commitMessage); this.set({ commitMessage: '', workingDiff: '', workingFile: '', notice: 'Commit criado. Use Enviar commits para fazer o push.' }); }, true);
   push = () => this.action(async () => { await this.stageQueue; await this.api.push(this.id); this.set({ notice: 'Push concluído.' }); }, true);
 }
