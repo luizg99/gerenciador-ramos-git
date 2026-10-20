@@ -87,7 +87,7 @@ export class AppController {
       if (!workingFile) return;
       const file = status.files.find(f => f.path === workingFile);
       if (!file) { this.set({ workingFile: '', workingDiff: '' }); return; }
-      const staged = file.index !== ' ' && file.index !== '?';
+      const staged = this.state.workingStaged && file.index !== ' ' && file.index !== '?' || file.worktree === ' ' && file.index !== ' ' && file.index !== '?';
       const diff = await this.api.workingDiff(id, workingFile, staged);
       if (this.repository?.id === id && this.state.workingFile === workingFile && !this.pendingStages && (diff !== this.state.workingDiff || staged !== this.state.workingStaged)) this.set({ workingDiff: diff, workingStaged: staged });
     } catch { /* falhas transitórias (ex.: git ocupado) são ignoradas; a próxima consulta tenta de novo */ }
@@ -306,7 +306,7 @@ export class AppController {
       this.set({ status });
       const file = status.files.find(f => f.path === this.state.workingFile);
       if (file && touched.includes(file.path)) {
-        const staged = file.index !== ' ' && file.index !== '?';
+        const staged = this.state.workingStaged && file.index !== ' ' && file.index !== '?' || file.worktree === ' ' && file.index !== ' ' && file.index !== '?';
         this.set({ workingDiff: await this.api.workingDiff(id, file.path, staged), workingStaged: staged });
       }
       else if (!file && this.state.workingFile) this.set({ workingFile: '', workingDiff: '' });
@@ -319,6 +319,15 @@ export class AppController {
   }, true, 'Descartando alterações…');
   cancelOperation = () => this.action(async () => { await this.api.cancelOperation(this.id); this.set({ notice: 'Operação Git cancelada.' }); }, true, 'Cancelando operação…');
   showWorkingDiff = (file: string, staged: boolean) => this.action(async () => { this.set({ workingDiff: await this.api.workingDiff(this.id, file, staged), workingFile: file, workingStaged: staged }); });
+  stageBlock = (hunk: number, block: number) => this.action(async () => {
+    await this.stageQueue;
+    const id = this.id, { workingFile: file, workingStaged: staged, workingDiff: diff } = this.state;
+    await this.api.stageBlock(id, file, staged, hunk, block, diff);
+    const status = await this.api.status(id);
+    const change = status.files.find(f => f.path === file);
+    const nextStaged = change && (staged ? change.index !== ' ' && change.index !== '?' : change.worktree === ' ' && change.index !== ' ' && change.index !== '?');
+    this.set({ status, workingStaged: !!nextStaged, workingDiff: change ? await this.api.workingDiff(id, file, !!nextStaged) : '', workingFile: change ? file : '' });
+  }, false, 'Atualizando trecho…');
   commit = () => this.action(async () => { await this.stageQueue; await this.api.commit(this.id, this.state.commitMessage); this.set({ commitMessage: '', workingDiff: '', workingFile: '', notice: 'Commit criado. Use Enviar commits para fazer o push.' }); }, true);
   push = () => this.action(async () => { await this.stageQueue; await this.api.push(this.id); this.set({ notice: 'Push concluído.' }); }, true);
 }

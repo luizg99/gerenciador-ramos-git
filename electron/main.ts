@@ -68,6 +68,7 @@ function registerIpc() {
   handle('git:commitFileDiff', z.tuple([id, hash, text]), (id, value, file) => controller.git.commitFileDiff(controller.repository(id), value, file));
   handle('git:workingDiff', z.tuple([id, text, z.boolean()]), (id, file, staged) => controller.git.workingDiff(controller.repository(id), file, staged));
   handle('git:stage', z.tuple([id, z.array(text).min(1).max(10000), z.boolean()]), (id, files, unstage) => controller.exclusive(() => controller.git.stage(controller.repository(id), files, unstage)));
+  handle('git:stageBlock', z.tuple([id, text, z.boolean(), z.number().int().min(0), z.number().int().min(0), z.string().max(2000000)]), (id, file, staged, hunk, block, diff) => controller.exclusive(() => controller.git.stageBlock(controller.repository(id), file, staged, hunk, block, diff)));
   handle('git:cancelOperation', z.tuple([id]), id => controller.mutate(id, repo => controller.git.cancelOperation(repo)));
   handle('git:discard', z.tuple([id, z.array(text).min(1).max(10000)]), (id, files) => controller.mutate(id, repo => controller.git.discard(repo, files)));
   handle('git:commit', z.tuple([id, z.string().min(1).max(20000)]), (id, message) => controller.mutate(id, repo => controller.git.commit(repo, message)));

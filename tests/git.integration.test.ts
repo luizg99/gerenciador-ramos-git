@@ -75,6 +75,35 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     expect(await git(f.repo, 'show', 'HEAD:README.md')).toBe(content.trim());
     expect(await readFile(path.join(f.repo, 'README.md'), 'utf8')).toBe(content);
   });
+  it('inclui e retira somente um trecho do commit mantendo o arquivo no disco', async () => {
+    const f = await fixture(); const service = new GitService();
+    const file = path.join(f.repo, 'trechos.txt');
+    await writeFile(file, 'primeira\ncontexto 1\ncontexto 2\ncontexto 3\nsegunda\n');
+    await service.stage(f.repo, ['trechos.txt'], false);
+    await service.commit(f.repo, 'Base de trechos');
+    await writeFile(file, 'PRIMEIRA\ncontexto 1\ncontexto 2\ncontexto 3\nSEGUNDA\n');
+    const diff = await service.workingDiff(f.repo, 'trechos.txt', false);
+    await service.stageBlock(f.repo, 'trechos.txt', false, 0, 0, diff);
+    expect(await git(f.repo, 'show', ':trechos.txt')).toContain('PRIMEIRA\n');
+    expect(await git(f.repo, 'show', ':trechos.txt')).toContain('\nsegunda');
+    expect(await readFile(file, 'utf8')).toContain('SEGUNDA');
+    await expect(service.stageBlock(f.repo, 'trechos.txt', false, 0, 0, diff)).rejects.toThrow('mudou');
+    const staged = await service.workingDiff(f.repo, 'trechos.txt', true);
+    await service.stageBlock(f.repo, 'trechos.txt', true, 0, 0, staged);
+    expect(await git(f.repo, 'show', ':trechos.txt')).toContain('primeira\n');
+    expect(await readFile(file, 'utf8')).toContain('PRIMEIRA');
+  });
+  it('seleciona uma linha entre substituições adjacentes', async () => {
+    const f = await fixture(); const service = new GitService();
+    const file = path.join(f.repo, 'linhas.txt');
+    await writeFile(file, 'um\ndois\ntres\n');
+    await service.stage(f.repo, ['linhas.txt'], false); await service.commit(f.repo, 'Base de linhas');
+    await writeFile(file, 'UM\nDOIS\ntres\n');
+    const diff = await service.workingDiff(f.repo, 'linhas.txt', false);
+    await service.stageBlock(f.repo, 'linhas.txt', false, 0, 1, diff);
+    expect(await git(f.repo, 'show', ':linhas.txt')).toBe('um\nDOIS\ntres');
+    expect(await readFile(file, 'utf8')).toBe('UM\nDOIS\ntres\n');
+  });
   it('detecta cherry-pick externo em andamento e impede a troca', async () => {
     const f = await fixture(); const service = new GitService(undefined, async () => {});
     await git(f.repo, 'switch', 'dev'); await change(f.repo, 'shared.txt', 'conflito', 'Conflito'); await expect(git(f.repo, 'cherry-pick', f.second)).rejects.toThrow();

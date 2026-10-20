@@ -4,6 +4,7 @@ import type { BatchResult, Branch, Commit, CommitDetail, FileChange, PullRequest
 import { azureRepoWebUrl, pullRequestCreateUrl } from './azure';
 import { hash, ref } from '../../src/models/validation';
 import { redact, runGit, runProcess } from './processRunner';
+import { selectedBlockPatch } from '../../src/models/partialStage';
 export type Reporter = (repo: string, message: string) => void;
 export class GitService {
   // Desligado pela configuração "Usa pman" do aplicativo; o serviço sozinho mantém o comportamento original.
@@ -272,6 +273,16 @@ export class GitService {
     const paths = [...new Set(files.flatMap(f => { const entry = changes.find(v => v.path === f); return [f, ...(entry?.originalPath ? [entry.originalPath] : [])]; }))];
     const literalPaths = paths.map(p => `:(literal)${p}`);
     await this.git(repo, unstage ? hasHead ? ['restore', '--staged', '--', ...literalPaths] : ['rm', '--cached', '--', ...literalPaths] : ['add', '--', ...literalPaths]);
+  }
+  async stageBlock(repo: string, file: string, staged: boolean, hunk: number, block: number, expectedDiff: string) {
+    if (await this.operation(repo)) throw new Error('Conclua ou cancele a operação Git antes de alterar trechos.');
+    const change = (await this.changes(repo)).find(f => f.path === file);
+    if (!change || change.originalPath || (staged ? change.index !== 'M' : change.worktree !== 'M')) throw new Error('A seleção por trecho está disponível para arquivos modificados.');
+    const current = await this.workingDiff(repo, file, staged);
+    if (current !== expectedDiff) throw new Error('O arquivo mudou desde que o diff foi aberto. Atualize a comparação.');
+    if (current.includes('\\ No newline at end of file') || current.includes('GIT binary patch')) throw new Error('Este diff exige preparar o arquivo inteiro.');
+    const patch = selectedBlockPatch(current, hunk, block, staged);
+    await runGit(repo, ['apply', '--cached', '--recount', '--unidiff-zero', ...(staged ? ['--reverse'] : []), '-'], patch);
   }
   private inside(repo: string, file: string) {
     const absolute = path.resolve(repo, file);

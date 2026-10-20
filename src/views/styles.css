@@ -171,6 +171,13 @@ main{min-width:0;display:flex;flex-direction:column}
 .diff .removed{color:#efb0bc;background:#2c1a20}
 .diff .hunk{color:#8ea6e8;background:#141a29;margin:4px 0}
 .diff .meta{color:var(--subtle)}
+.diff-action-hint{margin:0;padding:8px 12px;color:#b8c8ed;font-size:12px;background:#141a29;border-bottom:1px solid var(--line)}
+.diff-action-slot{display:inline-flex;position:sticky;left:calc(12ch + 32px);width:3ch;height:1.6em;align-items:center;justify-content:center;vertical-align:middle;background:#0c0e12;z-index:2}
+.diff .added .diff-action-slot{background:#13261e}
+.diff .removed .diff-action-slot{background:#2c1a20}
+.diff .hunk .diff-action-slot{background:#141a29}
+.diff-block-action{width:18px;height:18px;padding:0;border:1px solid #6373a0;border-radius:4px;background:#202b44;color:#dce6ff;font:bold 14px system-ui,sans-serif;line-height:14px;cursor:pointer}
+.diff-block-action:hover{background:#34456b}
 
 /* Alterações e commit */
 .changes-grid{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.4fr);gap:16px;align-items:start}
