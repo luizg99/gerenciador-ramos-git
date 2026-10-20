@@ -51,7 +51,7 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await service.switchBranch(f.repo, 'origin/DDVENDAS-999-main', 'block');
     expect((await service.status(f.repo)).upstream).toBe('origin/DDVENDAS-999-main');
   });
-  it('status, staging literal, unstage, diff, commit e push preservam os demais arquivos', async () => {
+  it('status, staging literal, unstage, diff, commit de todas as alterações e push', async () => {
     const f = await fixture(); const service = new GitService();
     await writeFile(path.join(f.repo, '[a].txt'), 'arquivo literal'); await writeFile(path.join(f.repo, 'a.txt'), 'outro arquivo');
     const initial = await service.status(f.repo); expect(initial.files.map(f => f.path)).toContain('[a].txt');
@@ -62,8 +62,20 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await expect(service.commit(f.repo, '   ')).rejects.toThrow('mensagem');
     await service.stage(f.repo, ['[a].txt'], false); await service.commit(f.repo, 'Adiciona arquivo com colchetes'); await service.push(f.repo);
     expect(await git(f.remote, 'show', `${f.source}:[a].txt`)).toBe('arquivo literal');
-    expect((await service.status(f.repo)).files.map(f => f.path)).toEqual(['a.txt']);
+    expect(await git(f.remote, 'show', `${f.source}:a.txt`)).toBe('outro arquivo');
+    expect((await service.status(f.repo)).files).toEqual([]);
     await expect(service.stage(f.repo, ['../fora.txt'], false)).rejects.toThrow('lista de alterações');
+  });
+  it('commit inclui a versão atual do arquivo mesmo quando só a anterior estava preparada', async () => {
+    const f = await fixture(); const service = new GitService();
+    await writeFile(path.join(f.repo, 'README.md'), 'versão preparada\n');
+    await service.stage(f.repo, ['README.md'], false);
+    await writeFile(path.join(f.repo, 'README.md'), 'versão final\n');
+    await writeFile(path.join(f.repo, 'novo.txt'), 'arquivo novo\n');
+    await service.commit(f.repo, 'Inclui tudo por padrão');
+    expect(await git(f.repo, 'show', 'HEAD:README.md')).toBe('versão final');
+    expect(await git(f.repo, 'show', 'HEAD:novo.txt')).toBe('arquivo novo');
+    expect((await service.status(f.repo)).files).toEqual([]);
   });
   it('preserva os bytes UTF-8 com acentos ao preparar e criar um commit', async () => {
     const f = await fixture(); const service = new GitService();
@@ -103,6 +115,34 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await service.stageBlock(f.repo, 'linhas.txt', false, 0, 1, diff);
     expect(await git(f.repo, 'show', ':linhas.txt')).toBe('um\nDOIS\ntres');
     expect(await readFile(file, 'utf8')).toBe('UM\nDOIS\ntres\n');
+  });
+  it('seleciona a primeira linha entre substituições adjacentes sem reordenar', async () => {
+    const f = await fixture(); const service = new GitService();
+    const file = path.join(f.repo, 'primeira-linha.txt');
+    await writeFile(file, 'um\ndois\ntres\n');
+    await service.stage(f.repo, ['primeira-linha.txt'], false); await service.commit(f.repo, 'Base das linhas');
+    await writeFile(file, 'UM\nDOIS\ntres\n');
+    await service.editBlocks(f.repo, 'primeira-linha.txt', false, [{ hunk: 0, block: 0 }], 'stage', await service.workingDiff(f.repo, 'primeira-linha.txt', false));
+    expect(await git(f.repo, 'show', ':primeira-linha.txt')).toBe('UM\ndois\ntres');
+  });
+  it('inclui e retira separadamente duas linhas Markdown vizinhas', async () => {
+    const f = await fixture(); const service = new GitService();
+    const file = path.join(f.repo, 'markdown.md');
+    const original = '- `npm run typecheck`: aprovado.\n- `npm test`: aprovado.\n- outra linha.\n';
+    const edited = '- [TESTE A] `npm run typecheck`: aprovado.\n- [TESTE B] `npm test`: aprovado.\n- outra linha.\n';
+    await writeFile(file, original);
+    await service.stage(f.repo, ['markdown.md'], false); await service.commit(f.repo, 'Base Markdown');
+    await writeFile(file, edited);
+    await service.editBlocks(f.repo, 'markdown.md', false, [{ hunk: 0, block: 0 }], 'stage', await service.workingDiff(f.repo, 'markdown.md', false));
+    expect(await git(f.repo, 'show', ':markdown.md')).toBe('- [TESTE A] `npm run typecheck`: aprovado.\n- `npm test`: aprovado.\n- outra linha.');
+    await service.editBlocks(f.repo, 'markdown.md', true, [{ hunk: 0, block: 0 }], 'unstage', await service.workingDiff(f.repo, 'markdown.md', true));
+    expect(await git(f.repo, 'show', ':markdown.md')).toBe(original.trim());
+    expect(await readFile(file, 'utf8')).toBe(edited);
+    await service.editBlocks(f.repo, 'markdown.md', false, [{ hunk: 0, block: 0 }], 'discard', await service.workingDiff(f.repo, 'markdown.md', false));
+    expect(await readFile(file, 'utf8')).toBe('- `npm run typecheck`: aprovado.\n- [TESTE B] `npm test`: aprovado.\n- outra linha.\n');
+    await service.editBlocks(f.repo, 'markdown.md', false, [{ hunk: 0, block: 0 }], 'discard', await service.workingDiff(f.repo, 'markdown.md', false));
+    expect(await readFile(file, 'utf8')).toBe(original);
+    expect((await service.status(f.repo)).files).toEqual([]);
   });
   it('seleciona linhas em massa e descarta mudanças sem deixar o reverso no diff', async () => {
     const f = await fixture(); const service = new GitService();

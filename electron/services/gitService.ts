@@ -320,7 +320,9 @@ export class GitService {
   async commit(repo: string, message: string) {
     const status = await this.ensureIdle(repo, false);
     if (!message.trim()) throw new Error('Informe uma mensagem para o commit.');
-    if (!status.files.some(f => f.index !== ' ' && f.index !== '?')) throw new Error('Selecione arquivos para o commit primeiro.');
+    if (!status.files.length) throw new Error('Não há alterações para o commit.');
+    const paths = [...new Set(status.files.flatMap(f => [f.path, ...(f.originalPath ? [f.originalPath] : [])]))];
+    await this.git(repo, ['add', '--all', '--', ...paths.map(file => `:(literal)${file}`)]);
     await this.git(repo, ['commit', '-m', message]);
   }
   async pushInfo(repo: string): Promise<{ remote: string; remoteBranch: string }> {

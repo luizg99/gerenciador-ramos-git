@@ -11,7 +11,7 @@ export function changeBlocks(diff: string): ChangeBlock[] {
     const groups = removed.length === added.length && removed.length > 0
       ? removed.map((line, i) => [line, added[i]])
       : removed.length && added.length ? [[...removed, ...added]] : (removed.length ? removed : added).map(line => [line]);
-    for (const group of groups) result.push({ hunk, block: block++, start: group[0], lines: group });
+    for (const group of groups) result.push({ hunk, block: block++, start: group.find(index => lines[index].startsWith('+')) ?? group[0], lines: group });
     start = -1;
   };
   lines.forEach((line, index) => {
@@ -42,14 +42,25 @@ export function selectedBlocksPatch(diff: string, selections: BlockSelection[], 
     if (!match) throw new Error('Cabeçalho do diff inválido.');
     const selectedLines = new Set(selected.filter(b => b?.hunk === hunkIndex).flatMap(b => b!.lines));
     const body: string[] = [];
-    for (let i = start + 1; i < end; i++) {
+    for (let i = start + 1; i < end;) {
       const line = lines[i];
-      if (line.startsWith('diff --git ') || line.startsWith('\\ No newline')) continue;
-      if (line.startsWith(' ')) body.push(line);
-      else if (line.startsWith('+') || line.startsWith('-')) {
-        if (selectedLines.has(i)) body.push(line);
-        else if (line[0] === (reverse ? '+' : '-')) body.push(' ' + line.slice(1));
+      if (line.startsWith(' ')) { body.push(line); i++; continue; }
+      if (line.startsWith('+') || line.startsWith('-')) {
+        let runEnd = i + 1;
+        while (runEnd < end && (lines[runEnd].startsWith('+') || lines[runEnd].startsWith('-'))) runEnd++;
+        const runBlocks = blocks.filter(b => b.hunk === hunkIndex && b.lines[0] >= i && b.lines[0] < runEnd);
+        for (const block of runBlocks) {
+          const chosen = block.lines.some(index => selectedLines.has(index));
+          for (const index of block.lines) {
+            const change = lines[index];
+            if (chosen) body.push(change);
+            else if (change[0] === (reverse ? '+' : '-')) body.push(' ' + change.slice(1));
+          }
+        }
+        i = runEnd;
+        continue;
       }
+      i++;
     }
     const oldCount = body.filter(line => line[0] !== '+').length;
     const newCount = body.filter(line => line[0] !== '-').length;
