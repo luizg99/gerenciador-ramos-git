@@ -1,4 +1,6 @@
 import type { ReviewInput, ReviewMessage } from './reviewMessage';
+import type { GeminiBounds, GeminiState } from './gemini';
+import type { JiraBounds, JiraBrowserState, JiraMethod } from './jira';
 export type SwitchMode = 'block' | 'carry' | 'stash';
 export interface Repository { id: string; path: string; name: string }
 export interface FileChange { path: string; originalPath?: string; index: string; worktree: string }
@@ -6,7 +8,7 @@ export interface Status { branch: string; files: FileChange[]; operation: string
 export interface Branch { ref: string; name: string; remote: boolean; current: boolean; upstream: string }
 export interface Commit { hash: string; subject: string; author: string; date: string; parents: string[] }
 export interface CommitDetail { files: string[]; diff: string }
-export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean }
+export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark' }
 export interface CherryPlan { source: string; commits: string[]; targets: string[] }
 export type Phase = 'pending' | 'switching' | 'pman' | 'applying' | 'pushing' | 'done' | 'failed' | 'interrupted';
 export interface TargetRun {
@@ -20,11 +22,22 @@ export interface SwitchResult { branch: string; stash?: string }
 export interface BatchResult { created: string[]; published: string[]; failures: string[]; branch?: string; stash?: string }
 export interface PullRequestInfo { remote: string | null; remoteUrl: string | null; webUrl: string | null; defaultTarget: string | null }
 export interface Api {
+  jiraView(bounds: JiraBounds | null): Promise<void>;
+  jiraState(): Promise<JiraBrowserState>;
+  jiraOpen(): Promise<void>;
+  jiraRequest(path: string, method?: JiraMethod, body?: unknown): Promise<unknown>;
+  onJiraState(callback: (state: JiraBrowserState) => void): () => void;
+  geminiView(bounds: GeminiBounds | null): Promise<void>;
+  geminiState(): Promise<GeminiState>;
+  geminiGenerate(text: string): Promise<void>;
+  geminiReopen(): Promise<void>;
+  geminiCopy(text: string, openBrowser: boolean): Promise<void>;
+  onGeminiState(callback: (state: GeminiState) => void): () => void;
   snapshot(): Promise<Snapshot>;
   chooseRoot(): Promise<Snapshot>;
   removeRoot(root: string): Promise<Snapshot>;
   scan(): Promise<Snapshot>;
-  updateSettings(patch: { usePman: boolean }): Promise<Snapshot>;
+  updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark' }): Promise<Snapshot>;
   selectRepository(id: string): Promise<void>;
   status(id: string): Promise<Status>;
   branches(id: string, fetch: boolean): Promise<Branch[]>;
@@ -49,6 +62,7 @@ export interface Api {
   findPullRequests(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; url: string }[]>;
   saveReviewMessage(id: string, input: ReviewInput): Promise<ReviewMessage>;
   copyReviewMessage(messageId: string): Promise<void>;
+  copyText(text: string): Promise<void>;
   commit(id: string, message: string): Promise<void>;
   push(id: string): Promise<void>;
   cherryPick(id: string, plan: CherryPlan): Promise<Execution>;

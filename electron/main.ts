@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, nativeTheme } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -10,11 +10,22 @@ import { parseJiraIssue, reviewInputSchema } from '../src/models/reviewMessage';
 import { AzurePullRequests, prPairsSchema } from './services/azurePullRequests';
 import { redact } from './services/processRunner';
 import type { Snapshot } from '../src/models/domain';
+import { installTextContextMenu } from './textContextMenu';
+import { GeminiBrowser } from './services/geminiBrowser';
+import { GEM_URL } from '../src/models/gemini';
+import { JiraBrowser } from './services/jiraBrowser';
+let gemini: GeminiBrowser;
+let jira: JiraBrowser;
 let window: BrowserWindow | null = null;
 let controller: ApplicationController;
 let ready: Promise<void>;
 const developmentUrl = !app.isPackaged ? process.env.VITE_DEV_SERVER_URL : undefined;
 const productionUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
+function applyTheme() {
+  const theme = controller.settings.theme ?? 'dark';
+  nativeTheme.themeSource = theme;
+  window?.setBackgroundColor(theme === 'light' ? '#f4f6fa' : '#0f1115');
+}
 if (process.env.RAMOS_TEST_DATA && !app.isPackaged) app.setPath('userData', process.env.RAMOS_TEST_DATA);
 function registerIpc() {
   const id = z.string().regex(/^[a-f0-9]{24}$/);
@@ -28,7 +39,30 @@ function registerIpc() {
     });
   }
   handle('app:snapshot', z.tuple([]), () => controller.snapshot());
-  handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean() })]), patch => controller.exclusive(() => controller.updateSettings(patch)));
+  const geminiText = z.string().trim().min(1).max(200000);
+  const bound = z.number().finite().min(-100000).max(100000);
+  handle('gemini:view', z.tuple([z.object({ x: bound, y: bound, width: bound.nonnegative(), height: bound.nonnegative() }).nullable()]), bounds => gemini.setBounds(bounds));
+  handle('gemini:state', z.tuple([]), () => gemini.getState());
+  handle('gemini:generate', z.tuple([geminiText]), text => gemini.generate(text));
+  handle('gemini:reopen', z.tuple([]), () => gemini.reopen());
+  handle('gemini:copy', z.tuple([geminiText, z.boolean()]), async (text, openBrowser) => {
+    clipboard.writeText(text);
+    if (openBrowser) await shell.openExternal(GEM_URL);
+  });
+  handle('app:copyText', z.tuple([z.string().trim().min(1).max(200000)]), text => clipboard.writeText(text));
+  const jiraBound = z.number().finite().min(-100000).max(100000);
+  handle('jira:view', z.tuple([z.object({ x: jiraBound, y: jiraBound, width: jiraBound.nonnegative(), height: jiraBound.nonnegative() }).nullable()]), bounds => jira.setBounds(bounds));
+  handle('jira:state', z.tuple([]), () => jira.getState());
+  handle('jira:open', z.tuple([]), () => jira.open());
+  handle('jira:request', z.tuple([
+    z.string().min(1).max(4096).refine(value => value.startsWith('/rest/api/2/') && !value.includes('..')),
+    z.enum(['GET', 'POST', 'PUT', 'DELETE']), z.unknown().optional()
+  ]), (url, method, body) => jira.request(url, method, body));
+  handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean().optional(), useGemini: z.boolean().optional(), useJira: z.boolean().optional(), useAzure: z.boolean().optional(), theme: z.enum(['light', 'dark']).optional() })]), patch => controller.exclusive(async () => {
+    const snapshot = await controller.updateSettings(patch);
+    applyTheme();
+    return snapshot;
+  }));
   handle('app:scan', z.tuple([]), () => controller.exclusive(() => controller.scan()));
   handle('app:chooseRoot', z.tuple([]), () => controller.exclusive(async () => {
     const chosen = await dialog.showOpenDialog(window!, { title: 'Selecione a pasta de projetos', properties: ['openDirectory'] });
@@ -81,6 +115,9 @@ function registerIpc() {
 async function createWindow() {
   window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 700, backgroundColor: '#0e1118', title: 'Gerenciador de Ramos', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.on('focus', () => window?.flashFrame(false));
+  installTextContextMenu(window);
+  gemini = new GeminiBrowser(window, state => { if (window && !window.isDestroyed()) window.webContents.send('gemini:changed', state); });
+  jira = new JiraBrowser(window, state => { if (window && !window.isDestroyed()) window.webContents.send('jira:changed', state); });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.on('close', event => { if (controller.busy) { event.preventDefault(); void dialog.showMessageBox(window!, { type: 'info', message: 'Aguarde a operação terminar antes de fechar.', detail: 'O progresso está sendo salvo. Fechar agora pode interromper um comando Git.' }); } });
@@ -105,7 +142,7 @@ else {
     };
     controller = new ApplicationController(git, new Storage(app.getPath('userData')), report, changed);
     // A janela abre já; as chamadas IPC aguardam só a leitura das configurações e da lista salva.
-    ready = controller.initialize(); registerIpc(); await createWindow(); await ready;
+    ready = controller.initialize().then(() => applyTheme()); registerIpc(); await createWindow(); await ready;
   }).catch(error => { dialog.showErrorBox('Falha ao iniciar', (error as Error).message); app.quit(); });
   app.on('window-all-closed', () => app.quit());
 }

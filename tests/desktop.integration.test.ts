@@ -19,7 +19,7 @@ it('compila o aplicativo e executa seleção → cherry-pick → push na interfa
   await change(f.repo, 'description.txt', 'description', 'Correção detalhada\n\nCorpo completo para revisão.');
   await git(f.repo, 'push');
   await mkdir(data); await mkdir(bin);
-  await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [f.root] }));
+  await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [f.root], useAzure: true }));
   // An actual executable on PATH exercises the Windows command invocation without installing proprietary dependencies.
   if (process.platform === 'win32') await writeFile(path.join(bin, 'pman.cmd'), '@echo off\r\nif not "%1 %2"=="install -f" exit /b 2\r\necho Dependencias de teste instaladas\r\nexit /b 0\r\n');
   else await writeFile(path.join(bin, 'pman'), '#!/bin/sh\n[ "$1 $2" = "install -f" ] || exit 2\necho dependencies-installed\n', { mode: 0o755 });
@@ -133,16 +133,16 @@ it('compila o aplicativo e executa seleção → cherry-pick → push na interfa
     await expectUI(page.getByLabel('Origem (1)', { exact: true })).toHaveValue('');
     await expectUI(page.getByLabel('Destino (1)', { exact: true })).toHaveValue('');
     await expectUI(page.getByLabel('Destino (2)', { exact: true })).toHaveCount(0);
-    await expectUI(page.getByLabel('Prévia da mensagem')).toContainText(`main: ${azureWeb}/pullrequest/870183`);
-    await expectUI(page.getByLabel('Prévia da mensagem')).toContainText(`dev: ${azureWeb}/pullrequest/870188`);
-    await page.getByLabel('Prévia da mensagem').getByRole('link', { name: `${azureWeb}/pullrequest/870183`, exact: true }).click();
+    await expectUI(page.getByLabel('Prévia da mensagem')).toContainText('main: VA41-PCSIS4139/pullrequest/870183');
+    await expectUI(page.getByLabel('Prévia da mensagem')).toContainText('dev: VA41-PCSIS4139/pullrequest/870188');
+    await page.getByLabel('Prévia da mensagem').getByRole('link', { name: 'VA41-PCSIS4139/pullrequest/870183', exact: true }).click();
     await expect.poll(() => app!.evaluate(() => (globalThis as any).testOpenedLinks)).toEqual([`${azureWeb}/pullrequest/870183`]);
     await page.getByRole('button', { name: 'Copiar mensagem', exact: true }).click();
     await expectUI(page.getByText('Mensagem copiada com o link formatado do Jira. Cole no Google Chat com Ctrl+V.', { exact: true })).toBeVisible();
     const copied = await app.evaluate(({ clipboard }) => ({ text: clipboard.readText(), html: clipboard.readHTML() }));
     expect(copied.html).toContain('href="https://jiraproducao.totvs.com.br/browse/DDVENDAS-61611">DDVENDAS-61611</a>');
     expect(copied.text).toContain('<https://jiraproducao.totvs.com.br/browse/DDVENDAS-61611|DDVENDAS-61611>');
-    expect(copied.text).toContain(`main: ${azureWeb}/pullrequest/870183`);
+    expect(copied.text).toContain(`main: <${azureWeb}/pullrequest/870183|VA41-PCSIS4139/pullrequest/870183>`);
     const savedReviews = JSON.parse(await readFile(path.join(data, 'review-messages.json'), 'utf8'));
     expect(savedReviews).toHaveLength(1); expect(savedReviews[0].issue.key).toBe('DDVENDAS-61611');
     await page.getByLabel('Buscar no histórico').fill('DDVENDAS-61611');

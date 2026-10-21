@@ -1,10 +1,31 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Api, Progress, Snapshot } from '../src/models/domain';
+import type { GeminiState } from '../src/models/gemini';
+import type { JiraBrowserState } from '../src/models/jira';
 const call = (name: string, ...args: unknown[]) => ipcRenderer.invoke(name, ...args).then((result: { ok: boolean; value?: unknown; error?: string }) => {
   if (!result.ok) throw new Error(result.error ?? 'Falha na operação.');
   return result.value;
 });
 const api: Api = {
+  jiraView: bounds => call('jira:view', bounds) as Promise<void>,
+  jiraState: () => call('jira:state') as Promise<JiraBrowserState>,
+  jiraOpen: () => call('jira:open') as Promise<void>,
+  jiraRequest: (path, method, body) => call('jira:request', path, method ?? 'GET', body) as Promise<unknown>,
+  onJiraState: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, state: JiraBrowserState) => callback(state);
+    ipcRenderer.on('jira:changed', listener);
+    return () => ipcRenderer.removeListener('jira:changed', listener);
+  },
+  geminiView: bounds => call('gemini:view', bounds) as Promise<void>,
+  geminiState: () => call('gemini:state') as Promise<GeminiState>,
+  geminiGenerate: text => call('gemini:generate', text) as Promise<void>,
+  geminiReopen: () => call('gemini:reopen') as Promise<void>,
+  geminiCopy: (text, openBrowser) => call('gemini:copy', text, openBrowser) as Promise<void>,
+  onGeminiState: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, state: GeminiState) => callback(state);
+    ipcRenderer.on('gemini:changed', listener);
+    return () => ipcRenderer.removeListener('gemini:changed', listener);
+  },
   snapshot: () => call('app:snapshot') as ReturnType<Api['snapshot']>,
   chooseRoot: () => call('app:chooseRoot') as ReturnType<Api['chooseRoot']>,
   removeRoot: root => call('app:removeRoot', root) as ReturnType<Api['removeRoot']>,
@@ -33,6 +54,7 @@ const api: Api = {
   findPullRequests: (id, pairs) => call('git:findPullRequests', id, pairs) as ReturnType<Api['findPullRequests']>,
   saveReviewMessage: (id, input) => call('reviews:save', id, input) as ReturnType<Api['saveReviewMessage']>,
   copyReviewMessage: messageId => call('reviews:copy', messageId) as Promise<void>,
+  copyText: text => call('app:copyText', text) as Promise<void>,
   pullRequestInfo: id => call('git:pullRequestInfo', id) as ReturnType<Api['pullRequestInfo']>,
   commit: (id, message) => call('git:commit', id, message) as Promise<void>,
   push: id => call('git:push', id) as Promise<void>,

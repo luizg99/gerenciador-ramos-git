@@ -21,12 +21,13 @@ describe('Mensagem de revisão', () => {
   it('gera texto completo e HTML com a issue clicável, sem expor marcação no texto simples', () => {
     const issue = parseJiraIssue('DDVENDAS-61611');
     const message = formatReviewMessage({ issue, prs }, new Date(2026, 9, 8, 12, 1));
-    expect(message.text).toBe(`Boa tarde, tarefa finalizada, disponível para revisão.\n\nIssue do Jira:\n<${issue!.url}|DDVENDAS-61611>\n\nPRs:\n\nsupport/37: ${prs[0].url}\n\nmaster: ${prs[1].url}`);
+    expect(message.text).toBe(`Boa tarde, tarefa finalizada, disponível para revisão.\n\nIssue do Jira:\n<${issue!.url}|DDVENDAS-61611>\n\nPRs:\n\nsupport/37: <${prs[0].url}|VA41-PCSIS4139/pullrequest/870183>\n\nmaster: <${prs[1].url}|VA41-PCSIS4139/pullrequest/870188>`);
     expect(message.text).not.toContain(`Issue do Jira:\n${issue!.url}`);
     expect(message.html).toContain(`<a href="${issue!.url}">DDVENDAS-61611</a>`);
+    expect(message.html).toContain(`<a href="${prs[0].url}">VA41-PCSIS4139/pullrequest/870183</a>`);
     expect(message.text).not.toContain('<a');
     const without = formatReviewMessage({ prs }, new Date(2026, 9, 8, 6));
-    expect(without.text).toBe(`Bom dia, tarefa finalizada, disponível para revisão.\n\nPRs:\n\nsupport/37: ${prs[0].url}\n\nmaster: ${prs[1].url}`);
+    expect(without.text).toBe(`Bom dia, tarefa finalizada, disponível para revisão.\n\nPRs:\n\nsupport/37: <${prs[0].url}|VA41-PCSIS4139/pullrequest/870183>\n\nmaster: <${prs[1].url}|VA41-PCSIS4139/pullrequest/870188>`);
     expect(without.html).not.toContain('Issue do Jira:');
     expect(formatReviewMessage({ prs: [{ target: '<img src=x>', url: prs[0].url }] }).html).toContain('&lt;img src=x&gt;');
   });

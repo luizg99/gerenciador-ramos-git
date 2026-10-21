@@ -41,8 +41,9 @@ export class ApplicationController {
     await this.storage.saveSettings(this.settings); return this.scan();
   }
   async removeRoot(root: string) { this.settings.roots = this.settings.roots.filter(r => r !== root); await this.storage.saveSettings(this.settings); return this.scan(); }
-  async updateSettings(patch: { usePman: boolean }) {
-    this.settings.usePman = patch.usePman; this.git.usePman = patch.usePman;
+  async updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark' }) {
+    Object.assign(this.settings, patch);
+    if (patch.usePman !== undefined) this.git.usePman = patch.usePman;
     await this.storage.saveSettings(this.settings); return this.snapshot();
   }
   async select(id: string) {

@@ -51,7 +51,7 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await service.switchBranch(f.repo, 'origin/DDVENDAS-999-main', 'block');
     expect((await service.status(f.repo)).upstream).toBe('origin/DDVENDAS-999-main');
   });
-  it('status, staging literal, unstage, diff, commit de todas as alterações e push', async () => {
+  it('status, staging literal, unstage, diff, commit somente dos selecionados e push', async () => {
     const f = await fixture(); const service = new GitService();
     await writeFile(path.join(f.repo, '[a].txt'), 'arquivo literal'); await writeFile(path.join(f.repo, 'a.txt'), 'outro arquivo');
     const initial = await service.status(f.repo); expect(initial.files.map(f => f.path)).toContain('[a].txt');
@@ -60,22 +60,25 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     expect(await service.workingDiff(f.repo, '[a].txt', true)).toContain('+arquivo literal');
     await service.stage(f.repo, ['[a].txt'], true); expect((await service.status(f.repo)).files.find(f => f.path === '[a].txt')?.index).toBe('?');
     await expect(service.commit(f.repo, '   ')).rejects.toThrow('mensagem');
+    await expect(service.commit(f.repo, 'Sem seleção')).rejects.toThrow('Selecione');
     await service.stage(f.repo, ['[a].txt'], false); await service.commit(f.repo, 'Adiciona arquivo com colchetes'); await service.push(f.repo);
     expect(await git(f.remote, 'show', `${f.source}:[a].txt`)).toBe('arquivo literal');
-    expect(await git(f.remote, 'show', `${f.source}:a.txt`)).toBe('outro arquivo');
-    expect((await service.status(f.repo)).files).toEqual([]);
+    await expect(git(f.remote, 'show', `${f.source}:a.txt`)).rejects.toThrow();
+    expect(await readFile(path.join(f.repo, 'a.txt'), 'utf8')).toBe('outro arquivo');
+    expect((await service.status(f.repo)).files.map(f => f.path)).toEqual(['a.txt']);
     await expect(service.stage(f.repo, ['../fora.txt'], false)).rejects.toThrow('lista de alterações');
   });
-  it('commit inclui a versão atual do arquivo mesmo quando só a anterior estava preparada', async () => {
+  it('commit preserva a seleção parcial e deixa alterações não preparadas no disco', async () => {
     const f = await fixture(); const service = new GitService();
     await writeFile(path.join(f.repo, 'README.md'), 'versão preparada\n');
     await service.stage(f.repo, ['README.md'], false);
     await writeFile(path.join(f.repo, 'README.md'), 'versão final\n');
     await writeFile(path.join(f.repo, 'novo.txt'), 'arquivo novo\n');
-    await service.commit(f.repo, 'Inclui tudo por padrão');
-    expect(await git(f.repo, 'show', 'HEAD:README.md')).toBe('versão final');
-    expect(await git(f.repo, 'show', 'HEAD:novo.txt')).toBe('arquivo novo');
-    expect((await service.status(f.repo)).files).toEqual([]);
+    await service.commit(f.repo, 'Inclui apenas o preparado');
+    expect(await git(f.repo, 'show', 'HEAD:README.md')).toBe('versão preparada');
+    await expect(git(f.repo, 'show', 'HEAD:novo.txt')).rejects.toThrow();
+    expect(await readFile(path.join(f.repo, 'README.md'), 'utf8')).toBe('versão final\n');
+    expect((await service.status(f.repo)).files.map(f => f.path)).toEqual(['README.md', 'novo.txt']);
   });
   it('preserva os bytes UTF-8 com acentos ao preparar e criar um commit', async () => {
     const f = await fixture(); const service = new GitService();

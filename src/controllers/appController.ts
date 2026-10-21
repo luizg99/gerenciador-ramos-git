@@ -1,7 +1,7 @@
 import type { Api, Branch, Commit, CommitDetail, Execution, FileChange, Progress, PullRequestInfo, Snapshot, Status, SwitchMode } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
-export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings';
+export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira';
 export interface ViewModel {
   snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
   switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[]; detail?: CommitDetail; selectedCommit: string;
@@ -127,9 +127,17 @@ export class AppController {
   refresh = () => this.action(() => this.refreshData());
   // "Usa pman" fica gravado em settings.json e vale para todo o aplicativo; padrão: desmarcado.
   get usePman() { return this.state.snapshot.settings.usePman ?? false; }
+  get useGemini() { return this.state.snapshot.settings.useGemini ?? false; }
+  get useJira() { return this.state.snapshot.settings.useJira ?? false; }
+  get theme() { return this.state.snapshot.settings.theme ?? 'dark'; }
+  setTheme = (theme: 'light' | 'dark') => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ theme }) }); });
+  get useAzure() { return this.state.snapshot.settings.useAzure ?? false; }
   // O pman na troca/criação só roda com o ajuste geral ligado E o check da aba marcado.
   get installOnSwitch() { return this.usePman && this.state.installOnSwitch; }
   setUsePman = (usePman: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ usePman }) }); });
+  setUseGemini = (useGemini: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useGemini }) }); });
+  setUseJira = (useJira: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useJira }) }); });
+  setUseAzure = (useAzure: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useAzure }) }); });
   chooseRoot = () => this.action(async () => { this.set({ snapshot: await this.api.chooseRoot() }); });
   removeRoot = (root: string) => this.action(async () => { this.set({ snapshot: await this.api.removeRoot(root) }); }, true);
   scan = () => this.action(async () => { this.set({ snapshot: await this.api.scan() }); }, true, 'Procurando repositórios…');
