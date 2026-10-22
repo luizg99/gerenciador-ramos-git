@@ -5,6 +5,39 @@ import { tempDirectory } from '../helpers';
 let app: ElectronApplication;
 test.afterEach(async () => { await app?.close(); });
 
+test('Gemini: aguarda a rota do Gem após passagem temporária pela página inicial', async () => {
+  const data = await tempDirectory('gemini-route-');
+  await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [], useGemini: true }));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => typeof value === 'string' && key !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>;
+  app = await electron.launch({ args: [path.resolve('.')], env: { ...env, RAMOS_TEST_DATA: data } });
+  await app.evaluate(async ({ session }) => {
+    (globalThis as any).gemLoads = 0;
+    await session.fromPartition('persist:team-gemini').protocol.handle('https', () => {
+      (globalThis as any).gemLoads++;
+      return new Response(`<html><body>
+        <script>
+          history.replaceState(null, '', '/app');
+          setTimeout(() => {
+            history.replaceState(null, '', '/gem/3bf604e9d2f3');
+            document.querySelector('[role=textbox]').contentEditable = 'true';
+          }, 400);
+        </script>
+        <rich-textarea><div role="textbox" contenteditable="false" style="min-height:120px"></div></rich-textarea>
+        <button aria-label="Enviar" onclick="document.body.dataset.sent='yes'">Enviar</button>
+      </body></html>`, { headers: { 'content-type': 'text/html' } });
+    });
+  });
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'Gemini', exact: true }).click();
+  await expect(page.getByText('Gem Dev aberto.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Reabrir Gem', exact: true }).click();
+  await expect(page.getByText('Gem Dev aberto.', { exact: false })).toBeVisible();
+  await page.getByLabel('Código e Nome').fill('Teste de navegação');
+  await page.getByRole('button', { name: 'Gerar Gem', exact: true }).click();
+  await expect(page.getByText('Texto enviado ao Gem Dev.', { exact: false })).toBeVisible({ timeout: 15000 });
+  expect(await app.evaluate(() => (globalThis as any).gemLoads)).toBe(3);
+});
+
 test('Gemini: formulário, nova conversa, preenchimento e isolamento do navegador', async ({}, testInfo) => {
   const data = await tempDirectory('gemini-ui-');
   await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [], useGemini: true }));
@@ -123,4 +156,31 @@ test('Gemini: formulário, nova conversa, preenchimento e isolamento do navegado
   await page.getByRole('button', { name: /Configurações/ }).click();
   await page.getByRole('button', { name: 'Gemini', exact: true }).click();
   await expect(page.getByLabel('Código e Nome')).toHaveValue('');
+});
+
+test('Gemini: navegação cancelada não aparece como falha de acesso', async () => {
+  const data = await tempDirectory('gemini-aborted-');
+  await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [], useGemini: true }));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => typeof value === 'string' && key !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>;
+  app = await electron.launch({ args: [path.resolve('.')], env: { ...env, RAMOS_TEST_DATA: data } });
+  await app.evaluate(async ({ session }) => {
+    await session.fromPartition('persist:team-gemini').protocol.handle('https', () => new Response('<rich-textarea><div role="textbox" contenteditable="true" style="min-height:120px"></div></rich-textarea><button aria-label="Enviar" onclick="document.body.dataset.sent=\'yes\'">Enviar</button>', { headers: { 'content-type': 'text/html' } }));
+  });
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'Gemini', exact: true }).click();
+  await expect(page.getByText('Gem Dev aberto.', { exact: false })).toBeVisible();
+  const abortNextNavigation = async () => app.evaluate(({ webContents }) => {
+    const contents = webContents.getAllWebContents().find(item => item.getURL().startsWith('https://gemini.google.com/'))!;
+    const load = contents.loadURL.bind(contents);
+    (contents as any).loadURL = async (url: string) => { (contents as any).loadURL = load; throw new Error(`ERR_ABORTED (-3) loading '${url}'`); };
+  });
+  await abortNextNavigation();
+  await page.getByRole('button', { name: 'Reabrir Gem' }).click();
+  await expect(page.getByText('ERR_ABORTED')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reabrir Gem' }).click();
+  await expect(page.getByText('Gem Dev aberto.', { exact: false })).toBeVisible();
+  await page.getByLabel('Código e Nome').fill('Rotina 4204');
+  await abortNextNavigation();
+  await page.getByRole('button', { name: 'Gerar Gem', exact: true }).click();
+  await expect(page.getByText('Texto enviado ao Gem Dev.', { exact: false })).toBeVisible({ timeout: 15000 });
 });

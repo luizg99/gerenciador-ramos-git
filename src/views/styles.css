@@ -312,11 +312,22 @@ main{min-width:0;display:flex;flex-direction:column}
 .route{display:flex;gap:12px;flex-wrap:wrap;color:var(--selected)}
 .review-commits{margin-top:16px;max-height:160px;overflow:auto}
 .review-commits p{font-size:12px;margin:4px 0}
+.execution-heading-meta{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.execution-heading-meta .pill{font-weight:600}
+.execution-heading-meta .outcome-success{color:var(--success-ink);background:var(--success-bg)}
+.execution-heading-meta .outcome-error{color:var(--error-ink);background:var(--error-bg)}
+.execution-heading-meta .outcome-active{color:var(--amber);background:var(--warning-bg)}
+.execution-heading-meta .outcome-cancelled,.execution-heading-meta .outcome-pending{color:var(--muted);background:var(--panel-2)}
 .execution-target{padding:12px 20px;border-top:1px solid var(--line)}
 .execution-target>div{display:flex;align-items:center;gap:10px}
-.execution-target strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}
-.execution-target .pill{margin-left:auto}
-.phase-dot{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#4c5466}
+.execution-target strong{min-width:0;font-size:13px;font-weight:500;overflow-wrap:anywhere}
+.execution-target .pill{margin-left:auto;flex-shrink:0;font-weight:600}
+.execution-target .pill.phase-pending{color:var(--muted);background:var(--panel-2)}
+.execution-target .pill.phase-switching,.execution-target .pill.phase-pman,.execution-target .pill.phase-applying,.execution-target .pill.phase-pushing{color:var(--amber);background:var(--warning-bg)}
+.execution-target .pill.phase-done{color:var(--success-ink);background:var(--success-bg)}
+.execution-target .pill.phase-failed,.execution-target .pill.phase-interrupted{color:var(--error-ink);background:var(--error-bg)}
+.phase-dot{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:var(--muted)}
+.phase-dot.switching,.phase-dot.pman,.phase-dot.applying,.phase-dot.pushing{background:var(--amber)}
 .phase-dot.done{background:var(--green)}
 .phase-dot.failed,.phase-dot.interrupted{background:var(--red)}
 .execution-error{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--error-ink);line-height:1.6;margin-bottom:0}

@@ -1,6 +1,10 @@
 import { WebContentsView, type BrowserWindow } from 'electron';
 import { GEM_URL, gemUrlForAccount, isGeminiHome, isGemStartUrl, type GeminiBounds, type GeminiState } from '../../src/models/gemini';
 
+function navigationAborted(error: unknown) {
+  return /ERR_ABORTED\s*\(-3\)/.test(error instanceof Error ? error.message : String(error));
+}
+
 // This runs in an isolated world in the remote page. No Node or app bridge is exposed.
 export function focusGemComposer() {
   if (location.origin !== 'https://gemini.google.com' || !/^\/(?:u\/\d+\/)?gem\/3bf604e9d2f3\/?$/.test(location.pathname)) return 'waiting';
@@ -40,6 +44,7 @@ export class GeminiBrowser {
   private request = 0;
   private generating = false;
   private homeRecovery = false;
+  private recovering?: number;
   private state: GeminiState = { phase: 'loading', message: 'Abrindo o Gem da equipe…' };
   constructor(private owner: BrowserWindow, private changed: (state: GeminiState) => void) {
     owner.on('closed', () => this.dispose());
@@ -50,7 +55,27 @@ export class GeminiBrowser {
     try { const current = new URL(this.view?.webContents.getURL() ?? ''); url = current.origin + current.pathname; } catch { /* Loading. */ }
     this.state = { phase, message, url }; this.changed(this.state);
   }
-  private cancel() { this.request++; this.generating = false; if (this.timer) clearInterval(this.timer); this.timer = undefined; }
+  private cancel() { this.request++; this.generating = false; this.recovering = undefined; if (this.timer) clearInterval(this.timer); this.timer = undefined; }
+  private async recoverHome() {
+    const contents = this.view?.webContents;
+    if (!contents || this.recovering !== undefined) return;
+    const request = this.request;
+    this.recovering = request;
+    try {
+      // Login can briefly visit /app before the Gemini client restores its route.
+      // Let that navigation settle instead of aborting it with another loadURL.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      if (request !== this.request || contents.isDestroyed() || !isGeminiHome(contents.getURL())) return;
+      this.homeRecovery = true;
+      await contents.loadURL(gemUrlForAccount(contents.getURL()));
+    } catch (error) {
+      if (request === this.request && !navigationAborted(error)) {
+        this.cancel(); this.update('error', 'Não foi possível abrir o Gem Dev. Clique em Reabrir Gem para tentar novamente.');
+      }
+    } finally {
+      if (this.recovering === request) this.recovering = undefined;
+    }
+  }
   private ensureView() {
     if (this.view) return this.view;
     const view = new WebContentsView({ webPreferences: {
@@ -74,11 +99,12 @@ export class GeminiBrowser {
       if (this.generating) { this.update(this.state.phase, this.state.message); return; }
       const url = contents.getURL();
       if (isGeminiHome(url)) {
+        if (this.recovering !== undefined) return;
         if (!this.homeRecovery) {
-          this.homeRecovery = true;
           this.update('loading', 'O Google abriu a página inicial. Abrindo o Gem Dev na conta selecionada…');
-          void contents.loadURL(gemUrlForAccount(url)).catch(() => {});
-        } else this.update('error', 'O Google voltou ao Gemini comum. Verifique se a conta selecionada tem acesso ao Gem Dev e clique em Reabrir Gem.');
+          const request = this.request;
+          void this.recoverHome().then(() => { if (request === this.request && !this.generating && !contents.isDestroyed() && isGeminiHome(contents.getURL())) loaded(); });
+        } else this.update('error', 'Não foi possível abrir diretamente o Gem Dev. Tente Reabrir Gem. Como alternativa, abra pelo menu do Gemini.');
       } else if (isGemStartUrl(url)) this.update('ready', 'Gem Dev aberto. Preencha o formulário e clique em Gerar Gem.');
       else this.update('ready', 'Conclua o login com a conta que tem acesso ao Gem Dev. Depois, clique em Reabrir Gem.');
     };
@@ -112,7 +138,8 @@ export class GeminiBrowser {
     this.homeRecovery = false;
     this.cancel(); this.update('loading', 'Abrindo uma nova conversa no Gem…');
     const contents = this.ensureView().webContents;
-    await contents.loadURL(gemUrlForAccount(contents.getURL()));
+    try { await contents.loadURL(gemUrlForAccount(contents.getURL())); }
+    catch (error) { if (!navigationAborted(error)) throw error; }
   }
   async generate(text: string) {
     if (this.generating) throw new Error('Aguarde o preenchimento atual ou reabra o Gem.');
@@ -122,9 +149,9 @@ export class GeminiBrowser {
     const request = this.request;
     this.update('filling', 'Abrindo nova conversa. Se necessário, entre com a conta da equipe para preencher o texto.');
     try { await contents.loadURL(gemUrlForAccount(contents.getURL())); }
-    catch {
-      if (request === this.request) { this.cancel(); this.update('error', 'Não foi possível abrir o Gem. Use Reabrir Gem ou o navegador externo.'); }
-      return;
+    catch (error) {
+      if (request !== this.request) return;
+      if (!navigationAborted(error)) { this.cancel(); this.update('error', 'Não foi possível abrir o Gem. Use Reabrir Gem ou o navegador externo.'); return; }
     }
     if (request !== this.request) return;
     const deadline = Date.now() + 120000;
@@ -138,14 +165,12 @@ export class GeminiBrowser {
       if (contents.isLoadingMainFrame()) return;
       if (isGeminiHome(contents.getURL())) {
         if (this.homeRecovery) {
-          this.cancel(); this.update('error', 'O Google voltou ao Gemini comum. O texto não foi preenchido. Selecione a conta com acesso ao Gem Dev e tente novamente.');
+          this.cancel(); this.update('error', 'O link direto voltou ao Gemini comum. O texto não foi preenchido. Abra o Gem Dev pelo menu do Gemini e tente novamente.');
           return;
         }
-        this.homeRecovery = true;
         checking = true;
         this.update('filling', 'Abrindo o Gem Dev na conta selecionada após o redirecionamento do Google…');
-        try { await contents.loadURL(gemUrlForAccount(contents.getURL())); }
-        catch { /* Load errors are handled by did-fail-load. */ }
+        try { await this.recoverHome(); }
         finally { checking = false; }
         return;
       }
