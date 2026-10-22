@@ -318,6 +318,21 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     expect((await service.status(unborn)).files).toEqual([{ path: 'a.txt', index: '?', worktree: '?' }]);
     expect(await readFile(path.join(unborn, 'a.txt'), 'utf8')).toBe('a');
   });
+  it('deleta diretório não versionado apresentado como uma única entrada pelo Git', async () => {
+    const f = await fixture(); const service = new GitService();
+    const directory = path.join(f.repo, 'source', 'lib', 'classshared2010');
+    await mkdir(directory, { recursive: true });
+    await git(directory, 'init');
+    await writeFile(path.join(directory, 'arquivo.txt'), 'conteúdo');
+    await configure(directory);
+    await git(directory, 'add', '.');
+    await git(directory, 'commit', '-m', 'Base interna');
+    const entry = (await service.status(f.repo)).files.find(file => file.path.startsWith('source/lib/classshared2010'));
+    expect(entry?.index).toBe('?');
+    await service.discard(f.repo, [entry!.path]);
+    await expect(stat(directory)).rejects.toThrow();
+    expect(await readFile(path.join(f.repo, 'README.md'), 'utf8')).toBe('Projeto\n');
+  });
   it('prepara e retira arquivos do primeiro commit sem remover o arquivo do disco', async () => {
     const repo = await tempDirectory('unborn-'); await git(repo, 'init', '-b', 'main'); await configure(repo); const service = new GitService();
     await writeFile(path.join(repo, 'primeiro.txt'), 'conteúdo'); await service.stage(repo, ['primeiro.txt'], false); await service.stage(repo, ['primeiro.txt'], true);

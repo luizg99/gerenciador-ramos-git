@@ -321,7 +321,7 @@ export class GitService {
       const literalPaths = added.map(e => `:(literal)${e.path}`);
       await this.git(repo, hasHead ? ['restore', '--staged', '--', ...literalPaths] : ['rm', '--cached', '--', ...literalPaths]);
     }
-    await Promise.all(untracked.map(file => rm(file, { force: true })));
+    await Promise.all(untracked.map(file => rm(file, { recursive: true, force: true })));
   }
   async commit(repo: string, message: string) {
     const status = await this.ensureIdle(repo, false);
