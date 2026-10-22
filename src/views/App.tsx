@@ -234,33 +234,54 @@ function Settings({ c, vm }: Props) {
 function History({ c, vm }: Props) { return <section className="card"><div className="toolbar"><BranchPicker label="Histórico do ramo" value={vm.historyRef} branches={vm.branches} onChange={historyRef => c.set({ historyRef })}/><button onClick={() => c.loadHistory(vm.historyRef)}>Carregar histórico</button></div><div className="split"><div><CommitList commits={vm.history} active={vm.selectedCommit} onInspect={c.showCommit}/>{!!vm.history.length && <button className="load-more" onClick={() => c.loadHistory(vm.historyRef, true)}>Carregar mais commits</button>}</div><Detail detail={vm.detail} selectedFile={vm.selectedCommitFile} onSelectFile={c.showCommitFile}/></div></section>; }
 function Changes({ c, vm }: Props) {
   const [confirm, setConfirm] = useState<string[] | null>(null);
+  const [contextFile, setContextFile] = useState<{ path: string; x: number; y: number } | null>(null);
   const [selectedBlocks, setSelectedBlocks] = useState<BlockSelection[]>([]);
   const [confirmBlocks, setConfirmBlocks] = useState(false);
   useEffect(() => { setSelectedBlocks([]); setConfirmBlocks(false); }, [vm.workingFile, vm.workingStaged, vm.workingDiff]);
+  useEffect(() => {
+    if (!contextFile) return;
+    const close = () => setContextFile(null);
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
+  }, [contextFile]);
   const files = vm.status?.files ?? [];
+  const versionedFiles = files.filter(f => f.index !== '?');
+  const unversionedFiles = files.filter(f => f.index === '?');
   const isStaged = (f: FileChange) => f.index !== ' ' && f.index !== '?';
   const stagedCount = files.filter(isStaged).length;
   const discard = () => { if (confirm) void c.discard(confirm); setConfirm(null); };
   const selectableDiff = vm.workingDiff.length <= 2000000 && !vm.workingDiff.includes('\\ No newline at end of file') && files.some(f => f.path === vm.workingFile && !f.originalPath && (vm.workingStaged ? f.index === 'M' : f.worktree === 'M'));
   const allBlocks = selectableDiff ? changeBlocks(vm.workingDiff).slice(0, 2000).map(({ hunk, block }) => ({ hunk, block })) : [];
   const toggleBlock = (hunk: number, block: number) => { setConfirmBlocks(false); setSelectedBlocks(current => current.some(s => s.hunk === hunk && s.block === block) ? current.filter(s => s.hunk !== hunk || s.block !== block) : [...current, { hunk, block }]); };
+  const confirmedFiles = files.filter(f => confirm?.includes(f.path));
+  const hasUntracked = confirmedFiles.some(f => f.index === '?');
+  const hasTracked = confirmedFiles.some(f => f.index !== '?' && f.index !== 'A');
+  const hasAdded = confirmedFiles.some(f => f.index === 'A');
   const row = (f: FileChange) => {
     const code = isStaged(f) ? f.index : f.worktree === '?' ? 'N' : f.worktree;
     const slash = f.path.lastIndexOf('/');
     const showStaged = f.worktree === ' ' && isStaged(f);
-    return <div className={`file-row ${vm.workingFile === f.path ? 'selected' : ''}`} key={f.path}>
+    return <div className={`file-row ${vm.workingFile === f.path ? 'selected' : ''}`} key={f.path} onContextMenu={f.index === '?' ? event => { event.preventDefault(); setContextFile({ path: f.path, x: Math.min(event.clientX, window.innerWidth - 150), y: Math.min(event.clientY, window.innerHeight - 85) }); } : undefined}>
       <input type="checkbox" aria-label={`Incluir ${f.path} no commit`} checked={isStaged(f)} disabled={vm.busy} ref={input => { if (input) input.indeterminate = isStaged(f) && f.worktree !== ' '; }} onChange={e => c.stage([f.path], !e.target.checked)}/>
       <span className={`file-status s-${code}`} title={statusLabels[code] ?? code}>{code}</span>
       <button className="file-name" title={f.path} onClick={() => c.showWorkingDiff(f.path, showStaged)}>{f.path.slice(slash + 1)}{slash > 0 && <small>{f.path.slice(0, slash)}</small>}</button>
-      <button className="icon danger" title={f.index === '?' || f.index === 'A' ? 'Excluir arquivo novo' : 'Descartar alterações'} aria-label={`Descartar alterações de ${f.path}`} onClick={() => setConfirm([f.path])}>↺</button>
+      <button className="icon danger" title={f.index === '?' ? 'Excluir arquivo novo' : f.index === 'A' ? 'Desfazer adição ao Git' : 'Descartar alterações'} aria-label={`Descartar alterações de ${f.path}`} onClick={() => setConfirm([f.path])}>↺</button>
+      {contextFile?.path === f.path && f.index === '?' && <div className="file-context-menu" role="menu" aria-label={`Ações de ${f.path}`} style={{ left: contextFile.x, top: contextFile.y }} onPointerDown={event => event.stopPropagation()}>
+        <button role="menuitem" autoFocus disabled={vm.busy} onClick={() => { setContextFile(null); void c.stage([f.path]); }}>Adicionar</button>
+        <button role="menuitem" className="danger" disabled={vm.busy} onClick={() => { setContextFile(null); setConfirm([f.path]); }}>Deletar</button>
+      </div>}
     </div>;
   };
   const confirmText = confirm && (confirm.length === 1 ? <>Descartar as alterações de <strong>{confirm[0]}</strong>?</> : <>Descartar as alterações de <strong>{confirm.length} arquivos</strong>?</>);
   return <div className="changes-grid"><section className="card">
     {!files.length ? <div className="empty small">Tudo limpo. Nenhuma alteração local.</div> : <div className="file-list">
       <div className="file-group"><strong>Alterações <span className="count">{files.length}</span></strong><button className="quiet" disabled={vm.busy} onClick={() => c.stage(files.map(f => f.path), stagedCount === files.length)}>{stagedCount === files.length ? 'Desmarcar todos' : 'Marcar todos'}</button><button className="quiet danger" disabled={vm.busy || stagedCount === 0} title="Descarta os arquivos marcados na lista" onClick={() => setConfirm(files.filter(isStaged).map(f => f.path))}>Descartar selecionadas</button></div>
-      {confirm && <div className="confirm-discard" role="alertdialog" aria-label="Confirmar descarte"><p>{confirmText} {confirm.length === 1 ? 'O arquivo volta ao último commit (se for novo, é apagado).' : 'Os arquivos voltam ao último commit e os novos são apagados.'} <strong>Não dá para desfazer.</strong></p><div><button onClick={() => setConfirm(null)}>Cancelar</button><button className="danger-solid" onClick={discard}>Descartar</button></div></div>}
-      {files.map(row)}
+      {confirm && <div className="confirm-discard" role="alertdialog" aria-label="Confirmar descarte"><p>{confirmText} {hasTracked && 'Arquivos versionados voltam ao último commit. '}{hasAdded && 'Arquivos novos adicionados voltam para Not Versioned Files e permanecem no disco. '}{hasUntracked && 'Arquivos não adicionados serão apagados do disco. '}{(hasTracked || hasUntracked) && <strong>Não dá para desfazer.</strong>}</p><div><button onClick={() => setConfirm(null)}>Cancelar</button><button className="danger-solid" onClick={discard}>Descartar</button></div></div>}
+      {versionedFiles.map(row)}
+      {!!unversionedFiles.length && <div className="file-group unversioned-group"><strong>Not Versioned Files <span className="count">{unversionedFiles.length}</span></strong></div>}
+      {unversionedFiles.map(row)}
     </div>}
     <div className="commit-form"><textarea aria-label="Mensagem do commit" rows={3} placeholder="Mensagem do commit" value={vm.commitMessage} onChange={e => c.set({ commitMessage: e.target.value })}/>
       <div className="card-actions"><span className="hint">{stagedCount} de {files.length} arquivos no commit. Apenas as alterações preparadas serão incluídas.</span><button onClick={c.push} title="Envia os commits locais para o upstream do ramo (ou origin, se ainda não configurado)">↑ Enviar{vm.status?.ahead ? ` (${vm.status.ahead})` : ''}</button><button className="primary" disabled={!stagedCount || !vm.commitMessage.trim() || vm.busy} onClick={c.commit}>Criar commit</button></div></div>

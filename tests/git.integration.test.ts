@@ -295,7 +295,7 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await expect(service.pullRequestUrls(f.repo, [{ source: 'dev', target: 'main' }, { source: 'so-local', target: 'main' }])).rejects.toThrow('ainda não está no remoto');
     await expect(service.pullRequestUrls(f.repo, [{ source: 'dev', target: 'main' }, { source: 'origin/dev', target: 'main' }])).rejects.toThrow('mais de uma vez');
   });
-  it('descarta modificados, excluídos, renomeados e arquivos novos sem tocar nos demais', async () => {
+  it('descarta alterações versionadas, desfaz adições e apaga arquivos não versionados', async () => {
     const f = await fixture(); const service = new GitService(); const file = (name: string) => readFile(path.join(f.repo, name), 'utf8');
     await writeFile(path.join(f.repo, 'shared.txt'), 'preparado\n'); await git(f.repo, 'add', 'shared.txt'); await writeFile(path.join(f.repo, 'shared.txt'), 'preparado\nmais\n');
     await rm(path.join(f.repo, 'README.md')); await git(f.repo, 'mv', 'first.txt', 'renomeado.txt');
@@ -305,13 +305,18 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     expect(untrackedDiff).toContain('@@ -0,0 +1,2 @@'); expect(untrackedDiff).toContain('+linha 2');
     await expect(service.discard(f.repo, ['../fora.txt'])).rejects.toThrow('lista de alterações');
     await service.discard(f.repo, ['shared.txt', 'README.md', 'renomeado.txt', 'novo.txt', 'solto.txt']);
-    expect((await service.status(f.repo)).files.map(v => v.path)).toEqual(['source/dependencies.txt']);
+    const remaining = await service.status(f.repo);
+    expect(remaining.files.map(v => v.path).sort()).toEqual(['novo.txt', 'source/dependencies.txt'].sort());
+    expect(remaining.files.find(v => v.path === 'novo.txt')?.index).toBe('?');
     expect(await file('shared.txt')).toBe('origem\n'); expect(await file('README.md')).toBe('Projeto\n'); expect(await file('first.txt')).toBe('primeiro\n');
-    for (const gone of ['renomeado.txt', 'novo.txt', 'solto.txt']) await expect(file(gone)).rejects.toThrow();
+    expect(await file('novo.txt')).toBe('novo');
+    for (const gone of ['renomeado.txt', 'solto.txt']) await expect(file(gone)).rejects.toThrow();
     expect(await file('source/dependencies.txt')).toBe('manter');
     const unborn = await tempDirectory('unborn-'); await git(unborn, 'init', '-b', 'main');
     await writeFile(path.join(unborn, 'a.txt'), 'a'); await git(unborn, 'add', 'a.txt'); await writeFile(path.join(unborn, 'b.txt'), 'b');
-    await service.discard(unborn, ['a.txt', 'b.txt']); expect((await service.status(unborn)).files).toEqual([]);
+    await service.discard(unborn, ['a.txt', 'b.txt']);
+    expect((await service.status(unborn)).files).toEqual([{ path: 'a.txt', index: '?', worktree: '?' }]);
+    expect(await readFile(path.join(unborn, 'a.txt'), 'utf8')).toBe('a');
   });
   it('prepara e retira arquivos do primeiro commit sem remover o arquivo do disco', async () => {
     const repo = await tempDirectory('unborn-'); await git(repo, 'init', '-b', 'main'); await configure(repo); const service = new GitService();

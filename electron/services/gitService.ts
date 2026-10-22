@@ -297,7 +297,7 @@ export class GitService {
     if (!absolute.startsWith(path.resolve(repo) + path.sep)) throw new Error('Arquivo fora do repositório.');
     return absolute;
   }
-  // Volta os arquivos ao estado do último commit (índice e disco). Arquivos novos são apagados.
+  // Arquivos novos preparados voltam a não versionados; os ainda não preparados são apagados.
   async discard(repo: string, files: string[]) {
     await this.ensureIdle(repo, false);
     const status = await this.status(repo);
@@ -305,15 +305,21 @@ export class GitService {
     if (!files.length || entries.some(e => !e)) throw new Error('Selecione arquivos presentes na lista de alterações.');
     const changes = entries as FileChange[];
     const untracked = changes.filter(e => e.index === '?').map(e => this.inside(repo, e.path));
-    const tracked = changes.filter(e => e.index !== '?');
+    const added = changes.filter(e => e.index === 'A');
+    const tracked = changes.filter(e => e.index !== '?' && e.index !== 'A');
+    const hasHead = await this.head(repo).then(() => true).catch(() => false);
     if (tracked.length) {
       const literalPaths = [...new Set(tracked.flatMap(e => [e.path, ...(e.originalPath ? [e.originalPath] : [])]))].map(p => `:(literal)${p}`);
-      if (await this.head(repo).then(() => true).catch(() => false)) await this.git(repo, ['restore', '--source=HEAD', '--staged', '--worktree', '--', ...literalPaths]);
+      if (hasHead) await this.git(repo, ['restore', '--source=HEAD', '--staged', '--worktree', '--', ...literalPaths]);
       else {
         // Sem commits ainda: tudo que está no índice é arquivo novo.
         await this.git(repo, ['rm', '--cached', '-q', '-f', '--', ...literalPaths]);
         untracked.push(...tracked.map(e => this.inside(repo, e.path)));
       }
+    }
+    if (added.length) {
+      const literalPaths = added.map(e => `:(literal)${e.path}`);
+      await this.git(repo, hasHead ? ['restore', '--staged', '--', ...literalPaths] : ['rm', '--cached', '--', ...literalPaths]);
     }
     await Promise.all(untracked.map(file => rm(file, { force: true })));
   }

@@ -1,0 +1,5 @@
+Na raiz do projeto, execute:
+
+npm run dist:installer
+
+O instalador .exe será gerado na pasta release. Se quiser a versão sem instalador, use npm run dist:win.

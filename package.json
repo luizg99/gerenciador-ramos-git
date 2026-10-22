@@ -1,6 +1,6 @@
 {
   "name": "gerenciador-de-ramos",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "Gerenciador de ramos Git para Windows",
   "author": "Gerenciador de Ramos",
@@ -34,7 +34,7 @@
     "vitest": "^3.2.0"
   },
   "build": {
-    "buildVersion": "0.1.6.0",
+    "buildVersion": "0.1.7.0",
     "appId": "br.com.gerenciadorderamos.app",
     "productName": "Gerenciador de Ramos",
     "directories": {

@@ -41,9 +41,22 @@ test('seleção de arquivos para commit coexiste com descarte de mudanças', asy
   await expect(page.getByRole('button', { name: 'Descartar selecionadas', exact: true })).toBeDisabled();
   await page.getByLabel('Incluir descartar.txt no commit').check();
   await page.getByRole('button', { name: 'Descartar selecionadas', exact: true }).click();
+  await expect(page.getByRole('alertdialog', { name: 'Confirmar descarte' })).toContainText('voltam para Not Versioned Files');
   await page.getByRole('alertdialog', { name: 'Confirmar descarte' }).getByRole('button', { name: 'Descartar' }).click();
-  await expect(page.getByLabel('Incluir descartar.txt no commit')).toHaveCount(0);
+  await expect(page.getByLabel('Incluir descartar.txt no commit')).not.toBeChecked();
+  expect(await readFile(path.join(f.repo, 'descartar.txt'), 'utf8')).toBe('remover\n');
   expect(await readFile(path.join(f.repo, 'fora.txt'), 'utf8')).toBe('preservar\n');
+  await expect(page.getByText('Not Versioned Files')).toBeVisible();
+  await page.getByRole('button', { name: 'fora.txt', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Adicionar' }).click();
+  await expect(page.getByLabel('Incluir fora.txt no commit')).toBeChecked();
+  await page.getByLabel('Incluir fora.txt no commit').uncheck();
+  await expect(page.getByText('Not Versioned Files')).toBeVisible();
+  await page.getByRole('button', { name: 'fora.txt', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Deletar' }).click();
+  await page.getByRole('alertdialog', { name: 'Confirmar descarte' }).getByRole('button', { name: 'Descartar' }).click();
+  await expect(page.getByLabel('Incluir fora.txt no commit')).toHaveCount(0);
+  await expect(readFile(path.join(f.repo, 'fora.txt'), 'utf8')).rejects.toThrow();
   await expect(page.getByRole('button', { name: 'Alterações e commit', exact: true })).toBeEnabled();
 });
 test('Electron: projetos, consulta Git real, histórico, validações e fronteira IPC', async () => {
