@@ -58,10 +58,14 @@ function registerIpc() {
     z.string().min(1).max(4096).refine(value => value.startsWith('/rest/api/2/') && !value.includes('..')),
     z.enum(['GET', 'POST', 'PUT', 'DELETE']), z.unknown().optional()
   ]), (url, method, body) => jira.request(url, method, body));
-  handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean().optional(), useGemini: z.boolean().optional(), useJira: z.boolean().optional(), useAzure: z.boolean().optional(), theme: z.enum(['light', 'dark']).optional() })]), patch => controller.exclusive(async () => {
+  handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean().optional(), useGemini: z.boolean().optional(), useJira: z.boolean().optional(), useAzure: z.boolean().optional(), theme: z.enum(['light', 'dark']).optional(), reviewHistoryPath: z.string().min(1).max(4096).optional() })]), patch => controller.exclusive(async () => {
     const snapshot = await controller.updateSettings(patch);
     applyTheme();
     return snapshot;
+  }));
+  handle('app:chooseReviewHistoryFolder', z.tuple([]), () => controller.exclusive(async () => {
+    const chosen = await dialog.showOpenDialog(window!, { title: 'Selecione a pasta do histórico de PR', properties: ['openDirectory'] });
+    return chosen.canceled ? controller.snapshot() : controller.updateSettings({ reviewHistoryPath: chosen.filePaths[0] });
   }));
   handle('app:scan', z.tuple([]), () => controller.exclusive(() => controller.scan()));
   handle('app:chooseRoot', z.tuple([]), () => controller.exclusive(async () => {

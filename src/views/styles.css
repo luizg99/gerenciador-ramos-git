@@ -89,6 +89,12 @@ nav b{margin-left:auto;font-size:11px;font-weight:600;border-radius:10px;backgro
 .jira-related-heading small{display:block;margin-top:4px}
 .jira-auto-ignore-label{display:inline-block;margin-left:6px;color:var(--green);font-size:10px}
 .jira-ignored-count{margin:4px 0;font-size:11px}
+.jira-hours-progress{margin:7px 0 10px 27px;max-width:520px}
+.jira-hours-progress-track{height:8px;overflow:hidden;border-radius:999px;background:var(--line)}
+.jira-hours-progress-track span{display:block;height:100%;border-radius:inherit;background:var(--green);transition:width .2s ease}
+.jira-hours-progress-labels{display:flex;justify-content:space-between;gap:12px;margin-top:4px;color:var(--muted);font-size:11px}
+.jira-hours-progress-labels strong{color:var(--text)}
+.jira-hours-overrun{display:block;margin-top:3px;color:var(--red);font-size:11px}
 .jira-cancel-controls{display:flex;gap:6px;align-items:center;margin-top:8px}
 .jira-cancel-controls select{flex:1;min-width:0}
 .jira-subtask-status{margin:7px 0 0;color:var(--muted);font-size:11px}
@@ -396,6 +402,11 @@ main{min-width:0;display:flex;flex-direction:column}
 .sidebar-footer .theme-picker{margin-bottom:10px}
 .appearance-setting{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:20px;margin-bottom:20px;border-bottom:1px solid var(--line)}
 .appearance-setting .hint{margin-top:6px}
+.history-path-setting{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 0 20px;margin:0 0 20px;border-bottom:1px solid var(--line)}
+.history-path-setting strong{font-size:14px;font-weight:600}
+.history-path-setting .hint{margin:4px 0 8px;font-size:13px;color:var(--muted);max-width:70ch}
+.history-path-value{display:block;overflow-wrap:anywhere;color:var(--muted);font-size:11px}
+.history-path-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .setting-row+.setting-row{margin-top:24px}
 a{color:var(--accent)}
 a:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
@@ -452,6 +463,7 @@ a:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-off
 .jira-pending strong{color:var(--text)}
 .jira-pending ul{margin:8px 0 0;padding-left:18px;color:var(--muted);line-height:1.6}
 .jira-flow-body>.card-actions{position:sticky;bottom:-16px;z-index:2;background:var(--panel);border-top:1px solid var(--line);padding:12px 0;margin-top:20px;flex-wrap:wrap;justify-content:flex-start}
+.jira-estimate-field input.jira-estimate-input{width:140px;max-width:100%}
 .jira-flow-body>.confirm-discard{margin:16px 0}
 .jira-empty{padding:40px 20px;text-align:center;border:1px dashed var(--line-strong);border-radius:10px;margin-top:24px;color:var(--muted)}
 .jira-empty>span{display:block;font-size:30px;color:var(--accent);margin-bottom:12px}
@@ -519,5 +531,6 @@ a:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-off
   .jira-layout{grid-template-columns:minmax(0,1fr);height:auto}
   .jira-workflow{height:70vh;min-height:440px}
   .jira-browser{height:60vh;min-height:360px}
-  .appearance-setting{align-items:flex-start;flex-direction:column}
+  .appearance-setting,.history-path-setting{align-items:flex-start;flex-direction:column}
+  .history-path-actions{justify-content:flex-start}
 }

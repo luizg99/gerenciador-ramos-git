@@ -54,7 +54,7 @@ test('Gemini: formulário, nova conversa, preenchimento e isolamento do navegado
       return new Response(`<!doctype html>
       <html lang="pt-BR"><body style="background:#131314;color:#ddd;font:16px sans-serif;padding:30px">
       <h1>Gem da equipe — página de teste</h1>
-      <rich-textarea><div role="textbox" contenteditable="${(globalThis as any).geminiTestWaiting ? 'false' : 'true'}" style="white-space:pre-wrap;border:1px solid #777;padding:16px;min-height:160px">${(globalThis as any).geminiTestOccupied ? 'Rascunho existente' : ''}</div></rich-textarea>
+      <rich-textarea><div class="ql-editor" role="textbox" contenteditable="${(globalThis as any).geminiTestWaiting ? 'false' : 'true'}" style="white-space:pre-wrap;border:1px solid #777;padding:16px;min-height:160px">${(globalThis as any).geminiTestOccupied ? 'Rascunho existente' : ''}</div><div class="ql-clipboard" contenteditable="true" tabindex="-1" style="position:absolute;left:-100000px;width:0;height:1px;overflow:hidden"></div></rich-textarea>
       <button aria-label="Enviar" onclick="document.body.dataset.sent='yes'">Enviar</button>
       ${(globalThis as any).geminiTestSpacing ? '<script>document.querySelector("[contenteditable]").addEventListener("input", e => { e.target.innerText = e.target.innerText.replace(/\\n/g, "\\n\\n"); }, { once: true });</script>' : ''}
       ${(globalThis as any).geminiTestTamper ? '<script>document.querySelector("[contenteditable]").addEventListener("input", e => { e.target.textContent += "CONTEUDO DIFERENTE"; }, { once: true });</script>' : ''}
@@ -98,6 +98,7 @@ test('Gemini: formulário, nova conversa, preenchimento e isolamento do navegado
   expect(text).toContain('<issue>ABC-123</issue>');
   expect(text).toContain('Preservar acentuação e <xml>.');
   expect(await remote('document.body.dataset.sent')).toBe('yes');
+  expect(await remote('document.querySelector(".ql-clipboard").textContent')).toBe('');
   expect(await remote('typeof window.gitManager')).toBe('undefined');
   expect(await remote('typeof require')).toBe('undefined');
   await page.getByRole('button', { name: 'Gerar Gem', exact: true }).click();

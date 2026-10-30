@@ -8,7 +8,7 @@ export interface Status { branch: string; files: FileChange[]; operation: string
 export interface Branch { ref: string; name: string; remote: boolean; current: boolean; upstream: string }
 export interface Commit { hash: string; subject: string; author: string; date: string; parents: string[] }
 export interface CommitDetail { files: string[]; diff: string }
-export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark' }
+export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }
 export interface CherryPlan { source: string; commits: string[]; targets: string[] }
 export type Phase = 'pending' | 'switching' | 'pman' | 'applying' | 'pushing' | 'done' | 'failed' | 'interrupted';
 export interface TargetRun {
@@ -35,9 +35,10 @@ export interface Api {
   onGeminiState(callback: (state: GeminiState) => void): () => void;
   snapshot(): Promise<Snapshot>;
   chooseRoot(): Promise<Snapshot>;
+  chooseReviewHistoryFolder(): Promise<Snapshot>;
   removeRoot(root: string): Promise<Snapshot>;
   scan(): Promise<Snapshot>;
-  updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark' }): Promise<Snapshot>;
+  updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }): Promise<Snapshot>;
   selectRepository(id: string): Promise<void>;
   status(id: string): Promise<Status>;
   branches(id: string, fetch: boolean): Promise<Branch[]>;

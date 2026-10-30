@@ -14,7 +14,7 @@ export const documentationFields = [
 ] as const;
 export type DocumentationDraft = Partial<Record<typeof documentationFields[number]['key'], string>>;
 export function documentationPrompt(draft: DocumentationDraft) {
-  const lines = ['Gerar Release Notes e Encerramento de Desenvolvimento', '', 'Questionário de Dados para Documentação (QA & Release Notes)'];
+  const lines = ['Gerar Encerramento de Desenvolvimento & Release notes.', 'Sempre dar espaçamento entre os tópicos do texto', '', 'Questionário de Dados para Documentação (QA & Release Notes)'];
   let section = '';
   for (const field of documentationFields) {
     if (section !== field.section) { section = field.section; lines.push('', section); }

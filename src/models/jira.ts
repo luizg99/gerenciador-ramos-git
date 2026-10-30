@@ -6,7 +6,7 @@ export type JiraMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 export interface JiraIssue {
   id: string; key: string; self: string;
   fields: {
-    timeoriginalestimate?: number | null; timetracking?: { originalEstimateSeconds?: number; originalEstimate?: string };
+    timeoriginalestimate?: number | null; aggregatetimeoriginalestimate?: number | null; timespent?: number | null; timetracking?: { originalEstimateSeconds?: number; originalEstimate?: string };
     summary: string; description?: unknown; status?: { name: string };
     issuetype?: { id: string; name: string; subtask?: boolean };
     project?: { id: string; key: string; name: string };
@@ -49,4 +49,4 @@ export function parsePrLinks(value = ''): string[] {
   }
   return [...links.values()];
 }
-export const originalEstimateSeconds = (issue: JiraIssue) => issue.fields.timeoriginalestimate ?? issue.fields.timetracking?.originalEstimateSeconds ?? 0;
+export const originalEstimateSeconds = (issue: JiraIssue) => issue.fields.timeoriginalestimate ?? issue.fields.timetracking?.originalEstimateSeconds ?? issue.fields.aggregatetimeoriginalestimate ?? 0;

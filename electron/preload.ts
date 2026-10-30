@@ -28,6 +28,7 @@ const api: Api = {
   },
   snapshot: () => call('app:snapshot') as ReturnType<Api['snapshot']>,
   chooseRoot: () => call('app:chooseRoot') as ReturnType<Api['chooseRoot']>,
+  chooseReviewHistoryFolder: () => call('app:chooseReviewHistoryFolder') as ReturnType<Api['chooseReviewHistoryFolder']>,
   removeRoot: root => call('app:removeRoot', root) as ReturnType<Api['removeRoot']>,
   scan: () => call('app:scan') as ReturnType<Api['scan']>,
   updateSettings: patch => call('app:updateSettings', patch) as ReturnType<Api['updateSettings']>,

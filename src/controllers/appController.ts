@@ -139,6 +139,8 @@ export class AppController {
   setUseJira = (useJira: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useJira }) }); });
   setUseAzure = (useAzure: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useAzure }) }); });
   chooseRoot = () => this.action(async () => { this.set({ snapshot: await this.api.chooseRoot() }); });
+  chooseReviewHistoryFolder = () => this.action(async () => { this.set({ snapshot: await this.api.chooseReviewHistoryFolder() }); });
+  setReviewHistoryPath = (reviewHistoryPath?: string) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ reviewHistoryPath }) }); });
   removeRoot = (root: string) => this.action(async () => { this.set({ snapshot: await this.api.removeRoot(root) }); }, true);
   scan = () => this.action(async () => { this.set({ snapshot: await this.api.scan() }); }, true, 'Procurando repositórios…');
   selectRepository = (id: string) => this.action(async () => {

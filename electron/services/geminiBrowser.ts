@@ -9,8 +9,10 @@ function navigationAborted(error: unknown) {
 export function focusGemComposer() {
   if (location.origin !== 'https://gemini.google.com' || !/^\/(?:u\/\d+\/)?gem\/3bf604e9d2f3\/?$/.test(location.pathname)) return 'waiting';
   if (document.querySelector('user-query, [data-message-author-role="user"]')) return 'conversation';
-  const editors = [...document.querySelectorAll<HTMLElement>('rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]')]
-    .filter(element => element.getBoundingClientRect().height > 0 && element.getAttribute('aria-disabled') !== 'true');
+  // Quill also has an offscreen, editable .ql-clipboard inside rich-textarea.
+  // Only the actual message editor is eligible for focus and validation.
+  const editors = [...document.querySelectorAll<HTMLElement>('rich-textarea .ql-editor[contenteditable="true"], [contenteditable="true"][role="textbox"]')]
+    .filter(element => element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0 && element.getAttribute('aria-disabled') !== 'true');
   const editor = editors[0];
   if (!editor) return 'waiting';
   if (editor.innerText.trim()) return 'occupied';
@@ -26,8 +28,8 @@ export function submitGemPrompt(expected: string) {
   // Gemini renders pasted paragraphs with its own spacing. Compare the words in
   // order while allowing the editor to change whitespace between them.
   const normalize = (value: string) => value.replace(/\s+/gu, ' ').trim();
-  const editors = [...document.querySelectorAll<HTMLElement>('rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]')]
-    .filter(element => element.getBoundingClientRect().height > 0 && element.getAttribute('aria-disabled') !== 'true');
+  const editors = [...document.querySelectorAll<HTMLElement>('rich-textarea .ql-editor[contenteditable="true"], [contenteditable="true"][role="textbox"]')]
+    .filter(element => element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0 && element.getAttribute('aria-disabled') !== 'true');
   if (editors.length !== 1 || normalize(editors[0].innerText) !== normalize(expected)) return 'text-mismatch';
   const labels = new Set(['send', 'send message', 'send prompt', 'submit', 'enviar', 'enviar mensagem', 'enviar prompt', 'enviar mensagem para gemini']);
   const buttons = [...document.querySelectorAll<HTMLButtonElement>('button[aria-label]')]
@@ -85,8 +87,19 @@ export class GeminiBrowser {
     view.setVisible(false);
     this.owner.contentView.addChildView(view);
     const contents = view.webContents;
-    contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    contents.session.setPermissionCheckHandler(() => false);
+    // Google serves Gemini as Chrome-only in some flows. Electron appends its
+    // own product tokens, which can route the Gem to an unsupported-client reply.
+    contents.setUserAgent(contents.getUserAgent().replace(/\s+gerenciador-de-ramos\/[^\s]+\s+Chrome\/([^\s]+)\s+Electron\/[^\s]+/, ' Chrome/$1'));
+    const canWriteGeminiClipboard = (requestingContents: Electron.WebContents | null, permission: string, requestingUrl: string, isMainFrame: boolean) => {
+      let origin = '';
+      try { origin = new URL(requestingUrl).origin; } catch { /* Unknown requester. */ }
+      return requestingContents === contents && permission === 'clipboard-sanitized-write' && isMainFrame && origin === 'https://gemini.google.com';
+    };
+    contents.session.setPermissionRequestHandler((requestingContents, permission, callback, details) => {
+      callback(canWriteGeminiClipboard(requestingContents, permission, details.requestingUrl, details.isMainFrame));
+    });
+    contents.session.setPermissionCheckHandler((requestingContents, permission, origin, details) =>
+      canWriteGeminiClipboard(requestingContents, permission, origin, details.isMainFrame));
     const secure = (value: string) => { try { return new URL(value).protocol === 'https:'; } catch { return false; } };
     contents.on('will-navigate', (event, url) => { if (!secure(url)) event.preventDefault(); });
     contents.on('will-redirect', (event, url) => { if (!secure(url)) event.preventDefault(); });

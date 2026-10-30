@@ -3,14 +3,18 @@ import path from 'node:path';
 import type { Execution, Repository, Settings } from '../../src/models/domain';
 import type { ReviewMessage } from '../../src/models/reviewMessage';
 export class Storage {
+  private reviewHistoryDirectory?: string;
   constructor(private directory: string) {}
   private async read<T>(name: string, fallback: T): Promise<T> {
     try { return JSON.parse(await readFile(path.join(this.directory, name), 'utf8')) as T; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback; throw new Error(`Não foi possível ler ${name}. Preserve o arquivo e corrija-o antes de continuar.`); }
   }
   private async write(name: string, value: unknown) {
-    await mkdir(this.directory, { recursive: true });
-    const target = path.join(this.directory, name);
+    await this.writeTo(this.directory, name, value);
+  }
+  private async writeTo(directory: string, name: string, value: unknown) {
+    await mkdir(directory, { recursive: true });
+    const target = path.join(directory, name);
     await writeFile(target + '.tmp', JSON.stringify(value, null, 2), 'utf8');
     await rename(target + '.tmp', target);
   }
@@ -18,8 +22,27 @@ export class Storage {
   saveSettings(settings: Settings) { return this.write('settings.json', settings); }
   executions() { return this.read<Execution[]>('executions.json', []); }
   saveExecutions(executions: Execution[]) { return this.write('executions.json', executions); }
-  reviewMessages() { return this.read<ReviewMessage[]>('review-messages.json', []); }
-  saveReviewMessages(messages: ReviewMessage[]) { return this.write('review-messages.json', messages); }
+  setReviewHistoryDirectory(directory?: string) { this.reviewHistoryDirectory = directory; }
+  private async readReviewMessagesAt(directory: string) {
+    try { return JSON.parse(await readFile(path.join(directory, 'review-messages.json'), 'utf8')) as ReviewMessage[]; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw new Error(`Não foi possível ler o histórico de PR em ${directory}.`); }
+  }
+  async configureReviewHistoryDirectory(directory?: string) {
+    const local = await this.readReviewMessagesAt(this.directory);
+    const current = this.reviewHistoryDirectory ? await this.readReviewMessagesAt(this.reviewHistoryDirectory) : [];
+    const targetDirectory = directory ?? this.directory;
+    const target = targetDirectory === this.directory ? local : await this.readReviewMessagesAt(targetDirectory);
+    const merged = [...new Map([...current, ...local, ...target].map(message => [message.id, message])).values()]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    await this.writeTo(targetDirectory, 'review-messages.json', merged);
+    this.reviewHistoryDirectory = directory;
+  }
+  async reviewMessages() {
+    if (!this.reviewHistoryDirectory) return this.readReviewMessagesAt(this.directory);
+    const current = await this.readReviewMessagesAt(this.reviewHistoryDirectory);
+    return current.length ? current : this.readReviewMessagesAt(this.directory);
+  }
+  saveReviewMessages(messages: ReviewMessage[]) { return this.writeTo(this.reviewHistoryDirectory ?? this.directory, 'review-messages.json', messages); }
   // Cache da última varredura: só acelera a abertura, então qualquer problema vira lista vazia.
   async repositories(): Promise<Repository[]> {
     const value = await this.read<unknown>('repositories.json', []).catch(() => []);

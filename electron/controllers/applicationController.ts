@@ -18,6 +18,7 @@ export class ApplicationController {
   // Abre com a lista da última sessão e atualiza em segundo plano.
   async initialize() {
     this.settings = await this.storage.settings(); await this.cherry.initialize();
+    this.storage.setReviewHistoryDirectory(this.settings.reviewHistoryPath);
     this.git.usePman = this.settings.usePman ?? false;
     this.repositories = await this.storage.repositories();
     const active = this.repositories.find(r => r.id === this.settings.activeRepository);
@@ -41,10 +42,19 @@ export class ApplicationController {
     await this.storage.saveSettings(this.settings); return this.scan();
   }
   async removeRoot(root: string) { this.settings.roots = this.settings.roots.filter(r => r !== root); await this.storage.saveSettings(this.settings); return this.scan(); }
-  async updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark' }) {
+  async updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }) {
+    const previousSettings = { ...this.settings };
+    if (Object.prototype.hasOwnProperty.call(patch, 'reviewHistoryPath')) await this.storage.configureReviewHistoryDirectory(patch.reviewHistoryPath);
     Object.assign(this.settings, patch);
     if (patch.usePman !== undefined) this.git.usePman = patch.usePman;
-    await this.storage.saveSettings(this.settings); return this.snapshot();
+    try { await this.storage.saveSettings(this.settings); }
+    catch (error) {
+      if (Object.prototype.hasOwnProperty.call(patch, 'reviewHistoryPath')) await this.storage.configureReviewHistoryDirectory(previousSettings.reviewHistoryPath).catch(() => {});
+      this.settings = previousSettings;
+      if (patch.usePman !== undefined) this.git.usePman = previousSettings.usePman ?? false;
+      throw error;
+    }
+    return this.snapshot();
   }
   async select(id: string) {
     const repo = this.repositories.find(r => r.id === id);

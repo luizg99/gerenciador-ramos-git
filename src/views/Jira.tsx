@@ -105,7 +105,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   const updateLog = (entry: string) => setLog(current => [...current, entry]);
   const loadIssue = () => action(async () => {
     const issueKey = parseJiraKey(key);
-    const loaded = await request<JiraIssue>(`${issuePath(issueKey)}?fields=summary,description,status,issuetype,project,assignee,parent,subtasks,issuelinks,timeoriginalestimate,timetracking`);
+    const loaded = await request<JiraIssue>(`${issuePath(issueKey)}?fields=summary,description,status,issuetype,project,assignee,parent,subtasks,issuelinks,timeoriginalestimate,aggregatetimeoriginalestimate,timetracking`);
     setMain(loaded); setKey(loaded.key); setError(''); setNotice(''); setEditingWorklog(null); setDrafts({});
     setCurrentUser(await request<JiraCurrentUser>('/rest/api/2/myself').catch(() => undefined));
     const subtaskLinks = toArray<any>(loaded.fields.subtasks);
@@ -114,7 +114,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     for (const link of toArray<any>(loaded.fields.issuelinks)) { if (link.inwardIssue) links.push(link.inwardIssue); if (link.outwardIssue) links.push(link.outwardIssue); }
     const unique = [...new Map(links.filter((issue: any) => issue.key !== loaded.key).map((issue: any) => [issue.key, issue])).values()].slice(0, 40);
     const details = await Promise.all(unique.map(async issue => {
-      try { return await request<JiraIssue>(`${issuePath(issue.key)}?fields=summary,description,status,issuetype,project,assignee,parent,subtasks,issuelinks,timeoriginalestimate,timetracking`); }
+      try { return await request<JiraIssue>(`${issuePath(issue.key)}?fields=summary,description,status,issuetype,project,assignee,parent,subtasks,issuelinks,timeoriginalestimate,aggregatetimeoriginalestimate,timetracking`); }
       catch { return issue as JiraIssue; }
     }));
     const supportMain = isSupportMain(loaded);
@@ -159,6 +159,17 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     }
   });
   const pickedTransitions = (issue: JiraIssue) => transitions[issue.key] ?? [];
+  const loggedSeconds = (issue: JiraIssue) => (worklogs[issue.key] ?? []).reduce((total, entry) => total + (Number(entry.timeSpentSeconds) || 0), 0);
+  const formatHours = (seconds: number) => (seconds / 3600).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  const renderHoursProgress = (issue: JiraIssue) => {
+    const estimate = originalEstimateSeconds(issue), logged = loggedSeconds(issue), remaining = Math.max(estimate - logged, 0);
+    const progress = estimate > 0 ? Math.min(logged / estimate * 100, 100) : 0;
+    return <div className="jira-hours-progress" aria-label={`Progresso de horas ${issue.key}`}>
+      <div className="jira-hours-progress-track" role="progressbar" aria-label={`Horas registradas em ${issue.key}`} aria-valuemin={0} aria-valuemax={estimate > 0 ? estimate : undefined} aria-valuenow={estimate > 0 ? Math.min(logged, estimate) : logged}><span style={{ width: `${progress}%` }}/></div>
+      <div className="jira-hours-progress-labels"><span><strong>{formatHours(logged)}h</strong> registradas</span>{estimate > 0 ? <span><strong>{formatHours(remaining)}h</strong> faltam de {formatHours(estimate)}h</span> : <span>Sem estimativa cadastrada</span>}</div>
+      {estimate > 0 && logged > estimate && <small className="jira-hours-overrun">Estimativa excedida em {formatHours(logged - estimate)}h.</small>}
+    </div>;
+  };
   const closedTransition = (issue: JiraIssue) => pickedTransitions(issue).find(item => normalizeStatus(item.to?.name) === 'CLOSED' || normalizeStatus(item.name) === 'CLOSED');
   const assigneeIsCurrentUser = (issue: JiraIssue, user = currentUser) => !!user && !!issue.fields.assignee && [user.name, user.key, user.accountId].some(value => !!value && [issue.fields.assignee?.name, issue.fields.assignee?.key, issue.fields.assignee?.accountId].includes(value));
   const codingCanClose = (issue: JiraIssue, user = currentUser) => normalizeStatus(issue.fields.status?.name) === 'EM ANDAMENTO' && assigneeIsCurrentUser(issue, user) && !!closedTransition(issue);
@@ -277,7 +288,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     if (!finalReady) throw new Error('Preencha as informações obrigatórias, confira LogTime, responsável pelos PRs e transições.');
     if (!window.confirm(`Executar o encerramento das tarefas Jira?\n\nCodificação: ${coding.map(i => i.key).join(', ') || 'nenhuma'}\nApoio: ${support.map(i => i.key).join(', ') || 'nenhum'}\nPrincipal: ${main!.key}\n\nO fluxo pode gravar comentários, editar descrições e causa da ocorrência, criar a tarefa Code Review e fechar as tarefas.`)) return;
     setLog([]);
-    const freshEstimates = await Promise.all(estimatedIssues.map(issue => request<JiraIssue>(`${issuePath(issue.key)}?fields=timeoriginalestimate,timetracking`)));
+    const freshEstimates = await Promise.all(estimatedIssues.map(issue => request<JiraIssue>(`${issuePath(issue.key)}?fields=timeoriginalestimate,aggregatetimeoriginalestimate,timetracking`)));
     for (const issue of freshEstimates) {
       if (originalEstimateSeconds(issue) > 0) continue;
       const hours = Number(estimates[issue.key]);
@@ -392,7 +403,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
         {!main && !busy && <div className="jira-empty"><span aria-hidden="true">☷</span><h3>Comece pela tarefa principal</h3><p>Carregue a tarefa para consultar as subtarefas, registrar LogTimes e preparar o encerramento.</p><small>Você poderá revisar as alterações antes de confirmar o fluxo.</small></div>}
         {main && <>
           <section className="card"><div className="card-heading"><div><h2>{main.key} — {main.fields.summary}</h2><p>{main.fields.issuetype?.name} · {main.fields.status?.name} · {main.fields.assignee?.displayName ?? 'Sem responsável'}</p></div><a href={`${JIRA_BASE}/browse/${encodeURIComponent(main.key)}`} target="_blank" rel="noreferrer">Abrir tarefa ↗</a></div>
-            <section aria-label="Estimativas de horas"><h3>Estimativas de horas</h3>{estimatedIssues.map(issue => <label className="jira-field" key={issue.key}><span>Estimativa original — {issue.key} (horas)</span><input type="number" min="0.01" step="any" required aria-label={`Estimativa de horas ${issue.key}`} disabled={busy || originalEstimateSeconds(issue) > 0} value={originalEstimateSeconds(issue) > 0 ? originalEstimateSeconds(issue) / 3600 : estimates[issue.key] ?? ''} onChange={e => setEstimates(current => ({ ...current, [issue.key]: e.target.value }))}/><small>{originalEstimateSeconds(issue) > 0 ? 'Já informada no Jira; não pode ser editada.' : 'Obrigatória. Será salva ao confirmar o fluxo.'}</small></label>)}</section>
+            <section aria-label="Estimativas de horas"><h3>Estimativas de horas</h3>{estimatedIssues.map(issue => { const estimate = originalEstimateSeconds(issue); const aggregated = estimate > 0 && !issue.fields.timeoriginalestimate && !issue.fields.timetracking?.originalEstimateSeconds && issue.fields.aggregatetimeoriginalestimate != null; return <label className="jira-field jira-estimate-field" key={issue.key}><span>Estimativa original — {issue.key}{issue.key === main.key ? ' · Tarefa principal' : ''} (horas)</span><input className="jira-estimate-input" type="number" min="0.01" step="any" required aria-label={`Estimativa de horas ${issue.key}`} disabled={busy || estimate > 0} value={estimate > 0 ? estimate / 3600 : estimates[issue.key] ?? ''} onChange={e => setEstimates(current => ({ ...current, [issue.key]: e.target.value }))}/><small>{aggregated ? `Estimativa considerada pelo Jira (${estimate / 3600}h).` : estimate > 0 ? 'Já informada no Jira; não pode ser editada.' : 'Obrigatória. Será salva ao confirmar o fluxo.'}</small></label>; })}</section>
             <div className="jira-flow-body" hidden={!isInDevelopment}>
             <div className="jira-flow-summary" aria-label="Resumo da entrega"><span><strong>{supportMain ? 'Apoio ao cliente' : `${coding.length} ${coding.length === 1 ? 'codificação' : 'codificações'}`}</strong>Tipo de entrega</span><span><strong>{Object.values(worklogs).reduce((total, entries) => total + entries.length, 0)}</strong>LogTimes carregados</span><span><strong>{finalReady ? 'Pronta para revisar' : 'Em preparação'}</strong>Situação da entrega</span></div>
             {supportMain && <>
@@ -413,6 +424,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
             {!related.length && <p className="hint">Nenhuma tarefa do tipo “Codificação (Sub-tarefa)” encontrada. Os outros tipos são ignorados automaticamente.</p>}
             {!!ignoredRelatedCount && <p className="hint jira-ignored-count">{ignoredRelatedCount} tarefa(s) vinculada(s) de outros tipos ignorada(s) automaticamente.</p>}
             <div className="jira-issue-list">{related.map(issue => <div className="jira-related" key={issue.key}><div className="jira-related-heading"><button className="jira-disclosure" aria-label={`${expandedCoding[issue.key] ? 'Recolher' : 'Expandir'} ${issue.key}`} aria-expanded={!!expandedCoding[issue.key]} onClick={() => setExpandedCoding(current => ({ ...current, [issue.key]: !current[issue.key] }))}>{expandedCoding[issue.key] ? '⌄' : '›'}</button><div><strong>{issue.key} — {issue.fields.summary}</strong><small>{issue.fields.issuetype?.name} · {issue.fields.status?.name} · {issue.fields.assignee?.displayName ?? 'Sem responsável'}<span className="jira-auto-ignore-label">Incluída no fluxo</span></small></div><a href={`${JIRA_BASE}/browse/${encodeURIComponent(issue.key)}`} target="_blank" rel="noreferrer" aria-label={`Abrir ${issue.key}`}>↗</a></div>
+                {renderHoursProgress(issue)}
                 {!!expandedCoding[issue.key] && <div><h4 className="jira-section">LogTime obrigatório — {issue.key}</h4>{worklogs[issue.key]?.map(entry => renderWorklog(issue, entry))}
                   {!worklogs[issue.key]?.length && <p className="inline-warning">Não há LogTime lançado. Lance antes de continuar o encerramento.</p>}
                   <div className="jira-new-worklogs" aria-label={`Novos LogTimes ${issue.key}`}>

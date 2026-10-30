@@ -13,7 +13,7 @@ it('preserva a conta ao reabrir o Gem e reconhece a página inicial após login'
 
 it('monta o questionário completo sem transformar exemplos em dados da entrega', () => {
   const text = documentationPrompt({ routine: 'Rotina 123', issue: '<issue>&"texto"</issue>', permissions: 'N/A', changes: 'Linha 1\nLinha 2' });
-  expect(text).toContain('Gerar Release Notes e Encerramento de Desenvolvimento');
+  expect(text.startsWith('Gerar Encerramento de Desenvolvimento & Release notes.\nSempre dar espaçamento entre os tópicos do texto\n\n')).toBe(true);
   expect(text).toContain('<issue>&"texto"</issue>');
   expect(text).toContain('Linha 1\nLinha 2');
   expect(text).toContain('N/A');
