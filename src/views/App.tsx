@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppController, type Tab, type ViewModel } from '../controllers/appController';
-import type { FileChange } from '../models/domain';
+import type { CloneSource, FileChange, RemoteRepository } from '../models/domain';
 import { ref } from '../models/validation';
 import { changeBlocks, type BlockSelection } from '../models/partialStage';
 import { greeting, parseJiraIssue, prLabel, type ReviewMessage } from '../models/reviewMessage';
@@ -24,6 +24,7 @@ const statusLabels: Record<string, string> = { M: 'Modificado', A: 'Adicionado',
 export function App({ controller: c }: { controller: AppController }) {
   const vm = useSyncExternalStore(c.subscribe, c.getSnapshot);
   const [search, setSearch] = useState('');
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => { try { return localStorage.getItem('projectsOpen') !== 'false'; } catch { return true; } });
   const toggleProjects = () => { const open = !projectsOpen; setProjectsOpen(open); try { localStorage.setItem('projectsOpen', String(open)); } catch { /* preferência só desta máquina */ } };
   const activityLogRef = useRef<HTMLDivElement>(null);
@@ -45,18 +46,82 @@ export function App({ controller: c }: { controller: AppController }) {
       <button className={`settings-link ${vm.tab === 'projects' ? 'selected' : ''}`} onClick={() => c.selectTab('projects')} disabled={vm.busy}>▣ Pastas de projetos</button><button className={`settings-link ${vm.tab === 'settings' ? 'selected' : ''}`} onClick={() => c.selectTab('settings')} disabled={vm.busy}>⚙ Configurações</button><div className="sidebar-footer"><ThemePicker c={c} disabled={vm.busy}/><span>v{packageJson.version}</span></div>
     </aside>
     <main>{!['jira', 'gemini'].includes(vm.tab) && <header className="topbar"><div className="topbar-title">{repo ? <nav className="crumbs" aria-label="Caminho do projeto" title={repo.path}>{crumbs(repo.path, vm.snapshot.settings.roots).map((part, i, all) => i === all.length - 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}<i>/</i></span>)}</nav> : <strong>Nenhum projeto selecionado</strong>}{vm.status && <span className="branch-badge" title="Ramo atual">⑂ {vm.status.branch}</span>}{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado local do repositório">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy} onClick={c.fetch} title="Busca ramos e commits novos do remoto (git fetch)">⇣ Buscar do remoto</button>}</div></header>}
-      <div className="page"><div className="page-heading"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1><p>{({ settings: 'Preferências do aplicativo, lembradas neste computador.', projects: 'Escolha as pastas onde ficam seus repositórios.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Revise as alterações, descarte o que não deve entrar e crie o commit.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Crie os pull requests no Azure com as mensagens dos commits na descrição.', gemini: 'Prepare a documentação da entrega com o Gem da equipe.', jira: 'Revise e execute o encerramento das tarefas no Jira.' })[vm.tab]}</p></div>
+      <div className="page"><div className="page-heading"><div className="page-heading-top"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1>{vm.tab === 'projects' && <button type="button" className="primary" disabled={vm.busy} onClick={() => setCloneOpen(true)}>＋ Clonar repositório</button>}</div><p>{({ settings: 'Preferências do aplicativo, lembradas neste computador.', projects: 'Escolha as pastas onde ficam seus repositórios.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Revise as alterações, descarte o que não deve entrar e crie o commit.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Crie os pull requests no Azure com as mensagens dos commits na descrição.', gemini: 'Prepare a documentação da entrega com o Gem da equipe.', jira: 'Revise e execute o encerramento das tarefas no Jira.' })[vm.tab]}</p></div>
       {vm.error && <div className="alert error" role="alert"><strong>Não foi possível concluir</strong><p>{vm.error}</p><button onClick={() => c.set({ error: '' })}>Fechar</button></div>}
       {vm.notice && <div className="alert success" role="status">{vm.notice}</div>}
       {vm.busy && <div className="running" role="status"><span className="spinner"/> {vm.busyMessage || 'Carregando...'}</div>}
       {vm.status?.operation && <div className="alert error">Operação Git em andamento: {vm.status.operation}. Resolva ou cancele antes de continuar. <button onClick={c.cancelOperation} disabled={vm.busy}>Cancelar operação</button></div>}
-      <div hidden={vm.tab !== 'jira'}><Jira active={vm.tab === 'jira'}/></div><fieldset className="page-content" disabled={vm.busy}>{vm.tab === 'projects' ? <Projects c={c} vm={vm}/> : vm.tab === 'settings' ? <Settings c={c} vm={vm}/> : vm.tab === 'gemini' ? <Gemini/> : vm.tab === 'jira' ? null : !repo ? vm.busy || vm.loadingRepository ? null : <div className="empty"><h2>Selecione um projeto</h2><button onClick={c.chooseRoot}>Adicionar pasta de projetos</button></div> : vm.tab === 'switch' ? <Switch c={c} vm={vm}/> : vm.tab === 'history' ? <History c={c} vm={vm}/> : vm.tab === 'commit' ? <Changes c={c} vm={vm}/> : vm.tab === 'cherry' ? <Cherry c={c} vm={vm}/> : <PullRequest c={c} vm={vm}/>}</fieldset>
+      <div hidden={vm.tab !== 'jira'}><Jira active={vm.tab === 'jira'}/></div><fieldset className="page-content" disabled={vm.busy}>{vm.tab === 'projects' ? <Projects c={c} vm={vm}/> : vm.tab === 'settings' ? <Settings c={c} vm={vm}/> : vm.tab === 'gemini' ? <Gemini/> : vm.tab === 'jira' ? null : !repo ? vm.busy || vm.loadingRepository ? null : <div className="empty"><h2>Selecione um projeto</h2><button onClick={c.chooseRoot}>Adicionar pasta de projetos</button></div> : vm.tab === 'switch' ? <Switch c={c} vm={vm}/> : vm.tab === 'history' ? <History c={c} vm={vm}/> : vm.tab === 'commit' ? <Changes c={c} vm={vm}/> : vm.tab === 'cherry' ? <Cherry c={c} vm={vm}/> : <PullRequest c={c} vm={vm}/>}</fieldset>{vm.tab === 'projects' && cloneOpen && <CloneDialog c={c} vm={vm} onClose={() => setCloneOpen(false)}/>}
       {!!vm.progress.length && <details className="operation-log" open={vm.busy} onToggle={e => { if (e.currentTarget.open) scrollActivityToBottom(); }}><summary>Atividade da sessão <span>{vm.progress.length} eventos</span></summary><div ref={activityLogRef}>{vm.progress.map((p, i) => <p key={i}><time>{new Date(p.time).toLocaleTimeString('pt-BR')}</time>{p.message}</p>)}</div></details>}
       </div><footer className="main-footer"><span>{repo?.path ?? 'Nenhum projeto selecionado'}</span><span>{vm.busy ? 'Operação em andamento' : 'Pronto'}</span></footer>
     </main>
   </div>;
 }
 function Projects({ c, vm }: Props) { return <><section className="card"><div className="card-heading"><div><h2>Pastas de projetos</h2><p>Repositórios são encontrados até quatro níveis abaixo de cada pasta.</p></div><button className="primary" onClick={c.chooseRoot}>＋ Adicionar pasta</button></div>{vm.snapshot.settings.roots.length ? vm.snapshot.settings.roots.map(root => <div className="root-row" key={root}><code>{root}</code><button onClick={() => c.removeRoot(root)}>Remover da lista</button></div>) : <div className="empty"><span className="empty-symbol">▱</span><h3>Tudo começa com uma pasta</h3><p>Selecione, por exemplo, sua pasta Documents\GitHub.</p><button className="primary" onClick={c.chooseRoot}>Escolher pasta de projetos</button></div>}</section><section className="card"><div className="card-heading"><h2>Repositórios encontrados <span className="count">{vm.snapshot.repositories.length}</span></h2><button onClick={c.scan}>Procurar novamente</button></div><div className="repo-grid">{vm.snapshot.repositories.map(r => <button className="repo-card" key={r.id} onClick={() => c.selectRepository(r.id)}><span>▣</span><strong>{r.name}</strong><small>{r.path}</small><b>Abrir projeto →</b></button>)}</div></section></>; }
+
+function splitClonePath(value: string) {
+  if (/[\\/]$/.test(value.trim())) return null;
+  const full = value.trim().replace(/[\\/]+$/, '');
+  const separator = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/'));
+  if (separator < 0 || !full.slice(separator + 1)) return null;
+  const parent = separator === 2 && /^[a-z]:/i.test(full) ? full.slice(0, 3) : full.slice(0, separator) || full[0];
+  return { parent, name: full.slice(separator + 1) };
+}
+
+function CloneDialog({ c, vm, onClose }: Props & { onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { if (dialog.current && !dialog.current.open) dialog.current.showModal(); return () => { if (dialog.current?.open) dialog.current.close(); }; }, []);
+  const [source, setSource] = useState<CloneSource>('github');
+  const [url, setUrl] = useState('');
+  const [suggestedParent, setSuggestedParent] = useState(vm.snapshot.settings.roots[0] ?? '');
+  const [suggestedName, setSuggestedName] = useState('');
+  const [customPath, setCustomPath] = useState<string | null>(null);
+  const [organization, setOrganization] = useState('');
+  const [enterpriseUrl, setEnterpriseUrl] = useState('');
+  const [project, setProject] = useState('');
+  const [filter, setFilter] = useState('');
+  const [repositories, setRepositories] = useState<RemoteRepository[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    void c.defaultCloneFolder().then(value => { if (active) setSuggestedParent(current => current || value); }).catch(cause => { if (active) setError((cause as Error).message); });
+    return () => { active = false; };
+  }, [c]);
+  const localPath = customPath ?? (suggestedParent ? `${suggestedParent.replace(/[\\/]+$/, '')}\\${suggestedName}` : '');
+  const destination = splitClonePath(localPath);
+  const sources: { id: CloneSource; label: string }[] = [{ id: 'github', label: 'GitHub.com' }, { id: 'enterprise', label: 'GitHub Enterprise' }, { id: 'url', label: 'URL' }, ...(c.useAzure ? [{ id: 'azure' as const, label: 'Azure Repos' }] : [])];
+  const chooseSource = (next: CloneSource) => { setSource(next); setUrl(''); setSuggestedName(''); setCustomPath(null); setRepositories([]); setFilter(''); setError(''); };
+  const chooseFolder = async () => { try { const selected = await c.chooseCloneFolder(destination?.parent ?? suggestedParent); if (selected) { setSuggestedParent(selected); setCustomPath(customPath === null ? null : `${selected.replace(/[\\/]+$/, '')}\\${destination?.name ?? suggestedName}`); } } catch (cause) { setError((cause as Error).message); } };
+  const lookup = async () => {
+    setError(''); setLoading(true); setRepositories([]);
+    try { setRepositories(source === 'azure' ? await c.listAzureRepositories(organization, project) : await c.listGitHubRepositories(source as 'github' | 'enterprise', enterpriseUrl)); }
+    catch (cause) { setError((cause as Error).message); }
+    finally { setLoading(false); }
+  };
+  const selectRemote = (repo: RemoteRepository) => { setUrl(repo.cloneUrl); setSuggestedName(source === 'azure' ? repo.name : repo.cloneUrl.replace(/\/$/, '').split('/').pop()?.replace(/\.git$/, '') ?? repo.name); setError(''); };
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); setError('');
+    if (!destination) { setError('Informe o caminho completo da nova pasta do repositório.'); return; }
+    await c.cloneRepository(source, url, destination.parent, destination.name);
+    const cloneError = c.getSnapshot().error;
+    if (cloneError) { setError(cloneError); c.set({ error: '' }); }
+    else onClose();
+  };
+  return <dialog ref={dialog} className="clone-dialog" aria-labelledby="clone-dialog-title" onCancel={event => { event.preventDefault(); if (!vm.busy) onClose(); }}>
+    <div className="clone-dialog-heading"><div><h2 id="clone-dialog-title">Clonar repositório</h2><p>Escolha a origem e a pasta onde o projeto será salvo.</p></div><button type="button" className="clone-dialog-close" aria-label="Fechar" onClick={onClose} disabled={vm.busy}>×</button></div>
+    <fieldset className="clone-dialog-content" disabled={vm.busy}><div className="clone-body"><div className="clone-sources" role="tablist" aria-label="Origem do repositório">{sources.map(item => <button key={item.id} type="button" role="tab" aria-selected={source === item.id} className={source === item.id ? 'selected' : ''} onClick={() => chooseSource(item.id)}>{item.label}</button>)}</div>
+      {(source === 'github' || source === 'enterprise') && <div className="clone-azure">{source === 'enterprise' && <label className="field"><span>Servidor GitHub Enterprise</span><input value={enterpriseUrl} onChange={e => setEnterpriseUrl(e.target.value)} placeholder="https://github.empresa.com"/></label>}<button type="button" onClick={lookup} disabled={loading || source === 'enterprise' && !enterpriseUrl.trim()}>{loading ? 'Buscando…' : 'Listar meus repositórios'}</button>{!loading && !repositories.length && !error && <p className="hint">Use suas credenciais Git para listar repositórios, ou cole a URL abaixo.</p>}</div>}
+      {source === 'azure' && <div className="clone-azure"><div className="clone-grid"><label className="field"><span>Organização Azure</span><input value={organization} onChange={e => setOrganization(e.target.value)} placeholder="https://dev.azure.com/minha-organizacao"/></label><label className="field"><span>Projeto (opcional)</span><input value={project} onChange={e => setProject(e.target.value)} placeholder="Filtrar por projeto"/></label></div><button type="button" onClick={lookup} disabled={loading || !organization.trim()}>{loading ? 'Buscando…' : 'Listar repositórios'}</button>{!!repositories.length && <><label className="field"><span>Filtrar repositórios</span><input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Nome do repositório ou projeto"/></label><div className="clone-results">{repositories.filter(repo => `${repo.name} ${repo.project}`.toLocaleLowerCase().includes(filter.toLocaleLowerCase())).map(repo => <button type="button" key={repo.cloneUrl} onClick={() => selectRemote(repo)} className={url === repo.cloneUrl ? 'selected' : ''}><strong>{repo.name}</strong><small>{repo.project}</small></button>)}</div></>}{!loading && organization && !repositories.length && !error && <p className="hint">Nenhum repositório listado. Confira a organização, o projeto e suas credenciais Git.</p>}</div>}
+      {(source === 'github' || source === 'enterprise') && !!repositories.length && <div className="clone-azure"><label className="field"><span>Filtrar repositórios</span><input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Nome ou proprietário"/></label><div className="clone-results">{repositories.filter(repo => `${repo.name} ${repo.project}`.toLocaleLowerCase().includes(filter.toLocaleLowerCase())).map(repo => <button type="button" key={repo.cloneUrl} onClick={() => selectRemote(repo)} className={url === repo.cloneUrl ? 'selected' : ''}><strong>{repo.name}</strong></button>)}</div></div>}
+      <form onSubmit={submit}>
+        <label className="field"><span>URL do repositório</span><input type="text" value={url} onChange={e => { const value = e.target.value; setUrl(value); setSuggestedName(value.replace(/\/$/, '').split(/[/:]/).pop()?.replace(/\.git$/, '') ?? ''); }} required placeholder={source === 'github' ? 'https://github.com/usuario/repositorio.git' : source === 'enterprise' ? 'https://github.empresa.com/equipe/repositorio.git' : source === 'azure' ? 'Selecione um repositório acima ou cole a URL' : 'https://servidor/equipe/repositorio.git'}/></label>
+        <div className="field"><span id="clone-local-path-label">Caminho local</span><div className="clone-destination"><input type="text" aria-labelledby="clone-local-path-label" value={localPath} onChange={e => setCustomPath(e.target.value)} required placeholder="C:\Users\Nome\Documents\GitHub\repositorio"/><button type="button" onClick={chooseFolder}>Escolher pasta…</button></div><small className="hint">Edite o caminho completo ou escolha outra pasta.</small></div>
+        {error && <p className="inline-warning" role="alert">{error}</p>}
+        <div className="card-actions"><button type="button" onClick={onClose} disabled={vm.busy}>Cancelar</button><button className="primary" type="submit" disabled={vm.busy || !url.trim() || !destination}>Clonar repositório</button></div>
+      </form>
+    </div></fieldset></dialog>;
+}
 // Ramo existe se bater com um local ou com um remoto sem o prefixo (origin/x → x).
 const branchExists = (branches: ViewModel['branches'], name: string) => branches.some(b => b.name === name || b.remote && b.name.slice(b.name.indexOf('/') + 1) === name);
 const validBranchName = (name: string) => ref.safeParse(name).success && !name.endsWith('/') && !name.endsWith('.lock');

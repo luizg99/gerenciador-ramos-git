@@ -14,6 +14,7 @@ import { installTextContextMenu } from './textContextMenu';
 import { GeminiBrowser } from './services/geminiBrowser';
 import { GEM_URL } from '../src/models/gemini';
 import { JiraBrowser } from './services/jiraBrowser';
+import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 let gemini: GeminiBrowser;
 let jira: JiraBrowser;
 let window: BrowserWindow | null = null;
@@ -71,6 +72,21 @@ function registerIpc() {
   handle('app:chooseRoot', z.tuple([]), () => controller.exclusive(async () => {
     const chosen = await dialog.showOpenDialog(window!, { title: 'Selecione a pasta de projetos', properties: ['openDirectory'] });
     return chosen.canceled ? controller.snapshot() : controller.addRoot(chosen.filePaths[0]);
+  }));
+  handle('app:defaultCloneFolder', z.tuple([]), () => controller.settings.roots[0] ?? path.join(app.getPath('documents'), 'GitHub'));
+  handle('app:chooseCloneFolder', z.tuple([z.string().max(4096).optional()]), async current => {
+    const chosen = await dialog.showOpenDialog(window!, { title: 'Selecione a pasta onde o repositório será clonado', defaultPath: current, properties: ['openDirectory', 'createDirectory'] });
+    return chosen.canceled ? null : chosen.filePaths[0];
+  });
+  handle('app:listAzureRepositories', z.tuple([z.string().max(2048), z.string().max(100)]), (organizationUrl, project) => {
+    if (!controller.settings.useAzure) throw new Error('Ative Usa Azure nas configurações.');
+    return listAzureRepositories(organizationUrl, project);
+  });
+  handle('app:listGitHubRepositories', z.tuple([z.enum(['github', 'enterprise']), z.string().max(2048)]), (source, enterpriseUrl) => listGitHubRepositories(source, enterpriseUrl));
+  handle('app:cloneRepository', z.tuple([z.enum(['github', 'enterprise', 'url', 'azure']), z.string().min(1).max(4096), z.string().min(1).max(4096), z.string().min(1).max(255)]), (source, url, parent, name) => controller.exclusive(async () => {
+    if (source === 'azure' && !controller.settings.useAzure) throw new Error('Ative Usa Azure nas configurações.');
+    const cloned = await cloneRepository(source, url, parent, name);
+    return controller.addRoot(cloned.parent);
   }));
   handle('app:removeRoot', z.tuple([text]), root => controller.exclusive(() => controller.removeRoot(root)));
   handle('app:select', z.tuple([id]), id => controller.exclusive(() => controller.select(id)));

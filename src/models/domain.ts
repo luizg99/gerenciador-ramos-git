@@ -3,6 +3,8 @@ import type { GeminiBounds, GeminiState } from './gemini';
 import type { JiraBounds, JiraBrowserState, JiraMethod } from './jira';
 export type SwitchMode = 'block' | 'carry' | 'stash';
 export interface Repository { id: string; path: string; name: string }
+export type CloneSource = 'github' | 'enterprise' | 'url' | 'azure';
+export interface RemoteRepository { name: string; cloneUrl: string; project: string }
 export interface FileChange { path: string; originalPath?: string; index: string; worktree: string }
 export interface Status { branch: string; files: FileChange[]; operation: string | null; ahead: number; behind: number; upstream: string | null }
 export interface Branch { ref: string; name: string; remote: boolean; current: boolean; upstream: string }
@@ -35,6 +37,11 @@ export interface Api {
   onGeminiState(callback: (state: GeminiState) => void): () => void;
   snapshot(): Promise<Snapshot>;
   chooseRoot(): Promise<Snapshot>;
+  defaultCloneFolder(): Promise<string>;
+  chooseCloneFolder(current?: string): Promise<string | null>;
+  cloneRepository(source: CloneSource, url: string, parent: string, name: string): Promise<Snapshot>;
+  listAzureRepositories(organizationUrl: string, project: string): Promise<RemoteRepository[]>;
+  listGitHubRepositories(source: 'github' | 'enterprise', enterpriseUrl: string): Promise<RemoteRepository[]>;
   chooseReviewHistoryFolder(): Promise<Snapshot>;
   removeRoot(root: string): Promise<Snapshot>;
   scan(): Promise<Snapshot>;

@@ -1,4 +1,4 @@
-import type { Api, Branch, Commit, CommitDetail, Execution, FileChange, Progress, PullRequestInfo, Snapshot, Status, SwitchMode } from '../models/domain';
+import type { Api, Branch, CloneSource, Commit, CommitDetail, Execution, FileChange, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
 export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira';
@@ -139,6 +139,14 @@ export class AppController {
   setUseJira = (useJira: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useJira }) }); });
   setUseAzure = (useAzure: boolean) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ useAzure }) }); });
   chooseRoot = () => this.action(async () => { this.set({ snapshot: await this.api.chooseRoot() }); });
+  defaultCloneFolder = () => this.api.defaultCloneFolder();
+  chooseCloneFolder = (current?: string) => this.api.chooseCloneFolder(current);
+  listAzureRepositories = (organizationUrl: string, project: string): Promise<RemoteRepository[]> => this.api.listAzureRepositories(organizationUrl, project);
+  listGitHubRepositories = (source: 'github' | 'enterprise', enterpriseUrl: string): Promise<RemoteRepository[]> => this.api.listGitHubRepositories(source, enterpriseUrl);
+  cloneRepository = (source: CloneSource, url: string, parent: string, name: string) => this.action(async () => {
+    const snapshot = await this.api.cloneRepository(source, url, parent, name);
+    this.set({ snapshot, notice: `Repositório ${name} clonado em ${parent}.` });
+  }, false, 'Clonando repositório…');
   chooseReviewHistoryFolder = () => this.action(async () => { this.set({ snapshot: await this.api.chooseReviewHistoryFolder() }); });
   setReviewHistoryPath = (reviewHistoryPath?: string) => this.action(async () => { this.set({ snapshot: await this.api.updateSettings({ reviewHistoryPath }) }); });
   removeRoot = (root: string) => this.action(async () => { this.set({ snapshot: await this.api.removeRoot(root) }); }, true);
