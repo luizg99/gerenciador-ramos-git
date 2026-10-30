@@ -10,6 +10,7 @@ export interface Status { branch: string; files: FileChange[]; operation: string
 export interface Branch { ref: string; name: string; remote: boolean; current: boolean; upstream: string }
 export interface Commit { hash: string; subject: string; author: string; date: string; parents: string[] }
 export interface CommitDetail { files: string[]; diff: string }
+export interface CommitReview { tree: string; head: string | null; diff: string; files: string[] }
 export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }
 export interface CherryPlan { source: string; commits: string[]; targets: string[] }
 export type Phase = 'pending' | 'switching' | 'pman' | 'applying' | 'pushing' | 'done' | 'failed' | 'interrupted';
@@ -49,6 +50,7 @@ export interface Api {
   selectRepository(id: string): Promise<void>;
   status(id: string): Promise<Status>;
   branches(id: string, fetch: boolean): Promise<Branch[]>;
+  fetchCurrentBranch(id: string): Promise<Branch[]>;
   switchBranch(id: string, branch: string, mode: SwitchMode, install: boolean): Promise<SwitchResult>;
   runPman(id: string): Promise<void>;
   log(id: string, ref: string, skip: number): Promise<Commit[]>;
@@ -63,6 +65,7 @@ export interface Api {
   createBranch(id: string, name: string, base: string, mode: SwitchMode, publish: boolean, install: boolean): Promise<SwitchResult & { published: boolean }>;
   createBranches(id: string, items: { name: string; base: string }[], switchTo: number | null, mode: SwitchMode, publish: boolean, install: boolean): Promise<BatchResult>;
   pullRequestInfo(id: string): Promise<PullRequestInfo>;
+  recentPushBranches(id: string): Promise<string[]>;
   reviewHistory(): Promise<ReviewMessage[]>;
   createPullRequests(id: string, pairs: { source: string; target: string }[], issue: string): Promise<{ prs: { source: string; target: string; url: string; created: boolean }[]; error?: string; message?: ReviewMessage }>;
   updateReviewIssue(messageId: string, issue: string): Promise<ReviewMessage>;
@@ -71,7 +74,8 @@ export interface Api {
   saveReviewMessage(id: string, input: ReviewInput): Promise<ReviewMessage>;
   copyReviewMessage(messageId: string): Promise<void>;
   copyText(text: string): Promise<void>;
-  commit(id: string, message: string): Promise<void>;
+  prepareCommit(id: string): Promise<CommitReview>;
+  commit(id: string, message: string, review: Pick<CommitReview, 'tree' | 'head'>): Promise<void>;
   push(id: string): Promise<void>;
   cherryPick(id: string, plan: CherryPlan): Promise<Execution>;
   cancelCherryPick(id: string, executionId: string): Promise<Execution>;

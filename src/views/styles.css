@@ -386,6 +386,8 @@ main{min-width:0;display:flex;flex-direction:column}
 .pr-arrow{padding-bottom:10px;color:var(--subtle);font-size:18px}
 .dynamic-toggle{margin:0 0 16px;font-size:13px;color:var(--text)}
 .dynamic-toggle small{color:var(--subtle)}
+.pr-preferences{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+.pr-preferences .manual-check{margin:0 auto 0 0}
 .batch{display:grid;gap:10px}
 .batch-row{display:grid;grid-template-columns:auto 1fr 1fr auto auto;gap:12px;align-items:end;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2)}
 .batch-row.pr-row{grid-template-columns:auto 1fr auto 1fr auto}
@@ -415,6 +417,17 @@ main{min-width:0;display:flex;flex-direction:column}
 .history-message-heading button{margin-left:auto}
 .review-link{overflow-wrap:anywhere;text-decoration:underline;cursor:pointer}
 .issue-dialog{width:min(520px,90vw);padding:24px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px}
+.commit-review-dialog{width:min(1100px,calc(100vw - 48px));max-height:calc(100vh - 48px);padding:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px}
+.commit-review-dialog[open]{display:flex;flex-direction:column}
+.commit-review-dialog::backdrop{background:rgba(0,0,0,.7)}
+.commit-review-heading,.commit-review-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px}
+.commit-review-heading{border-bottom:1px solid var(--line)}
+.commit-review-heading h2{margin:0;font-size:18px}
+.commit-review-heading p{margin:4px 0 0;color:var(--muted);font-size:12px}
+.commit-review-content{min-height:0;overflow:auto;padding:16px 20px}
+.commit-review-content>p{font-size:12px;overflow-wrap:anywhere}
+.commit-review-content .diff{max-height:none}
+.commit-review-actions{justify-content:flex-end;border-top:1px solid var(--line)}
 .issue-dialog::backdrop{background:rgba(0,0,0,.6)}
 .issue-dialog h2{margin:0 0 20px}
 .issue-dialog .card-actions{justify-content:flex-end;gap:12px}

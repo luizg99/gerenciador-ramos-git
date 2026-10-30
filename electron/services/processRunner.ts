@@ -5,9 +5,9 @@ export class CommandError extends Error {
 export function redact(value: string): string {
   return value.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, '$1***@').replace(/\x1b\[[0-9;]*m/g, '');
 }
-export function runProcess(command: string, args: string[], cwd: string, onOutput?: (text: string) => void, timeoutMs = 120000, input?: string): Promise<string> {
+export function runProcess(command: string, args: string[], cwd: string, onOutput?: (text: string) => void, timeoutMs = 120000, input?: string, extraEnv: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, windowsHide: true, shell: false, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C', GIT_PAGER: 'cat' } });
+    const child = spawn(command, args, { cwd, windowsHide: true, shell: false, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C', GIT_PAGER: 'cat', ...extraEnv } });
     let stdout = '', stderr = '', failure: string | undefined;
     const stop = (reason: string) => {
       failure = reason;
@@ -30,7 +30,7 @@ export function runProcess(command: string, args: string[], cwd: string, onOutpu
     });
   });
 }
-const allowed = new Set(['status', 'symbolic-ref', 'branch', 'switch', 'stash', 'log', 'show', 'diff', 'add', 'restore', 'rm', 'commit', 'push', 'fetch', 'cherry-pick', 'rev-parse', 'for-each-ref', 'rev-list', 'merge', 'merge-base', 'config', 'remote', 'check-ref-format', 'apply']);
+const allowed = new Set(['status', 'symbolic-ref', 'branch', 'switch', 'stash', 'log', 'show', 'diff', 'write-tree', 'add', 'restore', 'rm', 'commit', 'push', 'fetch', 'cherry-pick', 'rev-parse', 'for-each-ref', 'rev-list', 'merge', 'merge-base', 'config', 'remote', 'check-ref-format', 'apply']);
 export function runGit(repo: string, args: string[], input?: string): Promise<string> {
   if (!allowed.has(args[0]) || args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new Error('Comando Git não permitido.');
   if (args[0] === 'rm' && !args.includes('--cached')) throw new Error('A remoção de arquivos do disco não é permitida.');

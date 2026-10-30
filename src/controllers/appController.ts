@@ -1,4 +1,4 @@
-import type { Api, Branch, CloneSource, Commit, CommitDetail, Execution, FileChange, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode } from '../models/domain';
+import type { Api, Branch, CloneSource, Commit, CommitDetail, CommitReview, Execution, FileChange, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
 export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira';
@@ -8,9 +8,10 @@ export interface ViewModel {
   selectedCommitFile: string;
   source: string; sourceCommits: Commit[]; selectedCommits: string[]; targets: string[]; review: boolean;
   commitMessage: string; workingFile: string; workingStaged: boolean; workingDiff: string; progress: Progress[];
+  commitReview?: CommitReview; commitReviewMessage?: string;
   manualConfirmed: boolean; loadingRepository: boolean;
   createBase: string; publishNew: boolean; installOnSwitch: boolean; prInfo?: PullRequestInfo; prSource: string; prTarget: string;
-  dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[];
+  dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; rememberPrDestinations: boolean;
   jiraIssue: string; prUrl: string; reviewMessages: ReviewMessage[]; reviewSearch: string; generatedReview?: ReviewMessage;
 }
 // Estado esperado de um arquivo logo após marcar/desmarcar, até o status real chegar.
@@ -21,7 +22,8 @@ function optimistic(f: FileChange, unstage: boolean): FileChange {
 export interface BranchRow { name: string; base: string }
 export interface PrRow { source: string; target: string; url?: string }
 // Checks lembrados entre aberturas (só nesta máquina). Na primeira vez, todos desmarcados.
-const preferenceKeys = ['dynamicBranches', 'dynamicPr', 'installOnSwitch'] as const;
+const preferenceKeys = ['dynamicBranches', 'installOnSwitch', 'rememberPrDestinations'] as const;
+const emptyPrRows = (targets: string[] = []): PrRow[] => Array.from({ length: 4 }, (_, index) => ({ source: '', target: targets[index] ?? '' }));
 function loadPreferences(): Partial<ViewModel> {
   try {
     const saved = JSON.parse(localStorage.getItem('preferences') ?? '{}') as Record<string, unknown>;
@@ -35,6 +37,8 @@ export class AppController {
   private readonly initialPreferences = loadPreferences();
   private listeners = new Set<() => void>();
   private loadToken = 0;
+  private prLoadToken = 0;
+  private prSourcesVersion = 0;
   private stageQueue: Promise<void> = Promise.resolve();
   private pendingStages = 0;
   private state: ViewModel = {
@@ -42,7 +46,7 @@ export class AppController {
     switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], selectedCommit: '', selectedCommitFile: '', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
     commitMessage: '', workingFile: '', workingStaged: false, workingDiff: '', progress: [], manualConfirmed: false, loadingRepository: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
-    dynamicBranches: false, branchRows: [{ name: '', base: '' }], switchRow: this.initialPreferences.dynamicBranches ? 0 : null, dynamicPr: false, prRows: [{ source: '', target: '' }],
+    dynamicBranches: false, branchRows: [{ name: '', base: '' }], switchRow: this.initialPreferences.dynamicBranches ? 0 : null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false,
     jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: '',
     ...this.initialPreferences
   };
@@ -153,8 +157,9 @@ export class AppController {
   scan = () => this.action(async () => { this.set({ snapshot: await this.api.scan() }); }, true, 'Procurando repositórios…');
   selectRepository = (id: string) => this.action(async () => {
     await this.api.selectRepository(id);
+    this.prSourcesVersion++;
     this.set({ jiraIssue: '', prUrl: '', generatedReview: undefined });
-    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', detail: undefined, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, prRows: [{ source: '', target: '' }], workingFile: '', workingDiff: '', commitMessage: '', progress: [], manualConfirmed: false, tab: 'switch' });
+    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', detail: undefined, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), workingFile: '', workingDiff: '', commitMessage: '', progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
   selectTab = (tab: Tab) => { this.set({ tab, detail: undefined, selectedCommit: '' }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
@@ -164,7 +169,10 @@ export class AppController {
     if (this.state.tab !== 'cherry' || this.state.source || !branch || branch.startsWith('(')) return;
     this.setSource(branch); void this.loadSource();
   }
-  fetch = () => this.action(async () => { this.set({ branches: await this.api.branches(this.id, true), notice: 'Ramos remotos atualizados.' }); }, true);
+  fetch = () => this.action(async () => {
+    const branch = this.state.status?.upstream?.split('/').slice(1).join('/') || this.state.status?.branch;
+    this.set({ branches: await this.api.fetchCurrentBranch(this.id), notice: `Ramo ${branch} consultado no remoto.` });
+  }, true);
   switchBranch = () => this.action(async () => {
     const result = await this.api.switchBranch(this.id, this.state.switchTarget, this.state.switchMode, this.installOnSwitch);
     this.set({ notice: `Pronto! Ramo ${result.branch} selecionado${this.installOnSwitch ? ' e dependências instaladas' : ''}.${result.stash ? ` Stash preservado: ${result.stash.slice(0, 10)}.` : ''}`, switchTarget: '' });
@@ -174,16 +182,38 @@ export class AppController {
     const result = await this.api.createBranch(this.id, name, base, this.state.switchMode, this.state.publishNew, this.installOnSwitch);
     this.set({ notice: `Pronto! Ramo ${result.branch} criado a partir de ${base}${result.published ? ' e enviado para o remoto' : ''}, selecionado${this.installOnSwitch ? ' e com dependências instaladas' : ''}.${result.stash ? ` Stash preservado: ${result.stash.slice(0, 10)}.` : ''}`, switchTarget: '', createBase: '' });
   }, true, 'Criando ramo…');
-  // Pull request: origem começa no ramo atual e destino no ramo padrão do remoto.
+  private savedPrDestinations(id: string): string[] {
+    if (!this.state.rememberPrDestinations) return [];
+    try { const value = JSON.parse(localStorage.getItem(`prDestinations:${id}`) ?? '[]'); return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 4) : []; } catch { return []; }
+  }
+  setRememberPrDestinations = (enabled: boolean) => {
+    this.set({ rememberPrDestinations: enabled, ...(enabled ? {} : { prTarget: '', prRows: this.state.prRows.map(row => ({ ...row, target: '', url: undefined })) }) });
+    if (!enabled) try { localStorage.setItem(`prDestinations:${this.id}`, '[]'); } catch { /* preferência local indisponível */ }
+  };
+  clearPrSources = () => { this.prSourcesVersion++; this.set({ prSource: '', prRows: this.state.prRows.map(row => ({ ...row, source: '', url: undefined })) }); };
+  clearPrTargets = () => {
+    this.set({ prTarget: '', prRows: this.state.prRows.map(row => ({ ...row, target: '', url: undefined })) });
+    try { localStorage.removeItem(`prDestinations:${this.id}`); } catch { /* armazenamento local indisponível */ }
+  };
+  // Pull request: quatro pares disponíveis, com destinos lembrados somente quando solicitado.
   private async loadPullRequest() {
     if (!this.repository) return;
     try {
-      const id = this.id; const [prInfo, reviewMessages] = await Promise.all([this.api.pullRequestInfo(id), this.api.reviewHistory()]);
+      const id = this.id; const token = ++this.prLoadToken;
+      const recentPromise = this.api.recentPushBranches(id).catch(() => []);
+      const [prInfo, reviewMessages] = await Promise.all([this.api.pullRequestInfo(id), this.api.reviewHistory()]);
       if (this.repository?.id !== id) return;
       const current = this.state.status?.branch;
       const source = current && !current.startsWith('(') ? current : '';
+      const remembered = this.savedPrDestinations(id);
       const [first, ...rest] = this.state.prRows;
-      this.set({ prInfo, reviewMessages, prSource: this.state.prSource || source, prTarget: this.state.prTarget || prInfo.defaultTarget || '', prRows: [{ ...first, source: first.source || source, target: first.target || prInfo.defaultTarget || '' }, ...rest] });
+      const sourcesVersion = this.prSourcesVersion;
+      const initialRows = [first, ...rest].map((row, index) => ({ ...row, source: row.source || (index === 0 ? source : ''), target: row.target || remembered[index] || '' }));
+      this.set({ prInfo, reviewMessages, prSource: this.state.prSource || source, prTarget: this.state.prTarget || remembered[0] || '', prRows: initialRows });
+      const recent = await recentPromise;
+      if (this.repository?.id === id && token === this.prLoadToken && sourcesVersion === this.prSourcesVersion && recent.length) {
+        this.set({ prRows: this.state.prRows.map((row, index) => ({ ...row, source: row.source === initialRows[index]?.source ? recent[index] || row.source : row.source })) });
+      }
     } catch (error) { this.set({ error: (error as Error).message }); }
   }
   // Criação dinâmica: até 4 ramos, cada um com sua base; no máximo um vira o ramo atual.
@@ -206,10 +236,10 @@ export class AppController {
     this.set({ notice: parts.join(' '), branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
   }, true, 'Criando ramos…');
   // PR dinâmico: até 4 pares origem → destino, abertos de uma vez.
-  setPrRow = (index: number, patch: Partial<PrRow>) => this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch, url: undefined } : row) });
+  setPrRow = (index: number, patch: Partial<PrRow>) => { if ('source' in patch) this.prSourcesVersion++; this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch, url: undefined } : row) }); };
   setSinglePr = (patch: Partial<Pick<ViewModel, 'prSource' | 'prTarget'>>) => this.set({ ...patch, prUrl: '' });
   get reviewInput() {
-    return { issue: this.state.jiraIssue, prs: this.state.dynamicPr ? this.state.prRows.map(row => ({ target: row.target, url: row.url ?? '' })) : [{ target: this.state.prTarget, url: this.state.prUrl }] };
+    return { issue: this.state.jiraIssue, prs: this.state.dynamicPr ? this.state.prRows.filter(row => row.target.trim() && row.url).map(row => ({ target: row.target, url: row.url! })) : [{ target: this.state.prTarget, url: this.state.prUrl }] };
   }
   get reviewPreview() {
     if (this.state.generatedReview) return { ...this.state.generatedReview, ...formatReviewMessage(this.state.generatedReview) };
@@ -223,9 +253,14 @@ export class AppController {
   }
   findPullRequests = () => this.action(async () => {
     parseJiraIssue(this.state.jiraIssue);
-    const pairs = this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }];
+    const pairs = (this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }]).filter(row => row.source.trim() && row.target.trim());
+    if (!pairs.length) throw new Error('Preencha ao menos uma origem e um destino para buscar PRs.');
     const found = await this.api.findPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })));
-    if (this.state.dynamicPr) this.set({ prRows: this.state.prRows.map((row, index) => ({ ...row, url: found[index].url })) });
+    if (this.state.dynamicPr) {
+      const remote = this.state.prInfo?.remote;
+      const short = (value: string) => remote && value.trim().startsWith(remote + '/') ? value.trim().slice(remote.length + 1) : value.trim();
+      this.set({ prRows: this.state.prRows.map(row => ({ ...row, url: found.find(pr => pr.source === short(row.source) && pr.target === short(row.target))?.url })) });
+    }
     else this.set({ prUrl: found[0].url });
     const generatedReview = await this.api.saveReviewMessage(this.id, this.reviewInput);
     this.set({ generatedReview });
@@ -251,11 +286,12 @@ export class AppController {
     });
     return updated;
   };
-  addPrRow = () => { if (this.state.prRows.length < 4) this.set({ prRows: [...this.state.prRows, { source: this.state.prRows[0]?.source ?? '', target: '' }] }); };
-  removePrRow = (index: number) => { const rows = this.state.prRows.filter((_, i) => i !== index); this.set({ prRows: rows.length ? rows : [{ source: '', target: '' }] }); };
+  addPrRow = () => { if (this.state.prRows.length < 4) { this.prSourcesVersion++; this.set({ prRows: [...this.state.prRows, { source: '', target: '' }] }); } };
+  removePrRow = (index: number) => { this.prSourcesVersion++; const rows = this.state.prRows.filter((_, i) => i !== index); this.set({ prRows: rows.length ? rows : [{ source: '', target: '' }] }); };
   createPullRequests = () => this.action(async () => {
     parseJiraIssue(this.state.jiraIssue);
-    const pairs = this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }];
+    const pairs = (this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }]).filter(row => row.source.trim() && row.target.trim());
+    if (!pairs.length) throw new Error('Preencha ao menos uma origem e um destino para criar PR.');
     const result = await this.api.createPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })), this.state.jiraIssue);
     this.set({ generatedReview: result.message });
     const remote = this.state.prInfo?.remote;
@@ -263,7 +299,12 @@ export class AppController {
     const urlFor = (row: PrRow) => result.prs.find(pr => pr.source === short(row.source) && pr.target === short(row.target))?.url;
     if (this.state.dynamicPr) this.set({ prRows: this.state.prRows.map(row => ({ ...row, url: urlFor(row) })) });
     else this.set({ prUrl: urlFor(pairs[0]) ?? '' });
-    if (!result.error) this.set({ jiraIssue: '', prSource: '', prTarget: '', prUrl: '', prRows: [{ source: '', target: '' }] });
+    if (!result.error) {
+      const destinations = this.state.rememberPrDestinations ? pairs.map(row => row.target.trim()) : [];
+      if (this.state.rememberPrDestinations) try { localStorage.setItem(`prDestinations:${this.id}`, JSON.stringify(destinations)); } catch { /* sem armazenamento local */ }
+      this.prSourcesVersion++;
+      this.set({ jiraIssue: '', prSource: '', prTarget: destinations[0] ?? '', prUrl: '', prRows: emptyPrRows(destinations) });
+    }
     this.set({ error: result.error ?? '', notice: `${result.prs.filter(pr => pr.created).length} PR(s) criado(s), ${result.prs.filter(pr => !pr.created).length} já existente(s).${result.error ? ' Os resultados concluídos foram preservados; tente novamente para continuar.' : ' Descrições preenchidas com as mensagens dos commits. Mensagem para revisão pronta para copiar.'}` });
     this.set({ reviewMessages: await this.api.reviewHistory() });
   }, false, 'Criando PRs com as mensagens dos commits…');
@@ -347,6 +388,19 @@ export class AppController {
     const nextStaged = staged ? hasStaged : !!change && change.worktree === ' ' && hasStaged;
     this.set({ status, workingStaged: nextStaged, workingDiff: change ? await this.api.workingDiff(id, file, nextStaged) : '', workingFile: change ? file : '', notice: action === 'discard' ? `${selections.length} ${selections.length === 1 ? 'mudança descartada' : 'mudanças descartadas'} do arquivo.` : '' });
   }, false, action === 'discard' ? 'Descartando mudanças…' : 'Atualizando seleção…');
-  commit = () => this.action(async () => { await this.stageQueue; await this.api.commit(this.id, this.state.commitMessage); this.set({ commitMessage: '', workingDiff: '', workingFile: '', notice: 'Commit criado. Use Enviar commits para fazer o push.' }); }, true);
+  prepareCommit = () => this.action(async () => {
+    await this.stageQueue;
+    const review = await this.api.prepareCommit(this.id);
+    this.set({ commitReview: review, commitReviewMessage: this.state.commitMessage });
+  }, false, 'Preparando revisão final…');
+  cancelCommitReview = () => this.set({ commitReview: undefined, commitReviewMessage: undefined });
+  commit = () => this.action(async () => {
+    await this.stageQueue;
+    const review = this.state.commitReview, message = this.state.commitReviewMessage;
+    if (!review || !message) throw new Error('Abra a revisão final antes de criar o commit.');
+    this.cancelCommitReview();
+    await this.api.commit(this.id, message, { tree: review.tree, head: review.head });
+    this.set({ commitMessage: '', workingDiff: '', workingFile: '', notice: 'Commit criado. Use Enviar (push) para publicar.' });
+  }, true, 'Criando commit…');
   push = () => this.action(async () => { await this.stageQueue; await this.api.push(this.id); this.set({ notice: 'Push concluído.' }); }, true);
 }

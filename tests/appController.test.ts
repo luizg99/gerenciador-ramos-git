@@ -19,6 +19,44 @@ function fakeApi() {
   return { api, finish: (id: string, branch: string) => pending.get(id)!(status(branch)) };
 }
 describe('AppController', () => {
+  it('abre quatro PRs, ignora linhas incompletas e lembra destinos somente quando marcado', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); }, removeItem: (key: string) => { store.delete(key); } });
+    try {
+      const createPullRequests = vi.fn(async () => ({ prs: [{ source: 'feature', target: 'main', url: 'https://dev.azure.com/org/project/_git/repo/pullrequest/1', created: true }] }));
+      const api = { createPullRequests, reviewHistory: async () => [] } as unknown as Api;
+      const c = new AppController(api);
+      c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
+      expect(c.getSnapshot().prRows).toHaveLength(4);
+      c.setPrRow(0, { source: 'feature', target: 'main' });
+      c.setPrRow(1, { source: 'other' });
+      c.setRememberPrDestinations(true);
+      await c.createPullRequests();
+      expect(createPullRequests).toHaveBeenCalledWith(a.id, [{ source: 'feature', target: 'main' }], '');
+      expect(c.getSnapshot().prRows.map(row => row.target)).toEqual(['main', '', '', '']);
+      c.setRememberPrDestinations(false);
+      expect(c.getSnapshot().prRows.every(row => !row.target)).toBe(true);
+      expect(store.get(`prDestinations:${a.id}`)).toBe('[]');
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('preenche as origens com pushes recentes sem sobrescrever uma limpeza feita pelo usuário', async () => {
+    let finishRecent!: (branches: string[]) => void;
+    const recent = new Promise<string[]>(resolve => { finishRecent = resolve; });
+    const api = {
+      pullRequestInfo: async () => ({ remote: 'origin', remoteUrl: 'https://dev.azure.com/org/project/_git/repo', webUrl: 'https://dev.azure.com/org/project/_git/repo', defaultTarget: 'main' }),
+      reviewHistory: async () => [], recentPushBranches: () => recent
+    } as unknown as Api;
+    const c = new AppController(api);
+    c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] }, status: status('current') });
+    c.selectTab('pr');
+    await vi.waitFor(() => expect(c.getSnapshot().prInfo?.remote).toBe('origin'));
+    expect(c.getSnapshot().prRows[0].source).toBe('current');
+    c.clearPrSources();
+    finishRecent(['old', 'new']);
+    await vi.waitFor(() => expect(c.getSnapshot().prRows.every(row => !row.source)).toBe(true));
+    c.selectTab('switch'); c.selectTab('pr');
+    await vi.waitFor(() => expect(c.getSnapshot().prRows.map(row => row.source)).toEqual(['old', 'new', '', '']));
+  });
   it('deixa trocar de projeto enquanto o anterior ainda carrega e descarta o resultado antigo', async () => {
     const { api, finish } = fakeApi(); const c = new AppController(api);
     c.connect();
@@ -70,10 +108,11 @@ describe('AppController', () => {
     vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } });
     try {
       const first = new AppController(fakeApi().api);
-      expect(first.getSnapshot()).toMatchObject({ dynamicBranches: false, dynamicPr: false, installOnSwitch: false, publishNew: true });
+      expect(first.getSnapshot()).toMatchObject({ dynamicBranches: false, dynamicPr: true, installOnSwitch: false, publishNew: true });
+      expect(first.getSnapshot().prRows).toHaveLength(4);
       first.set({ dynamicBranches: true, installOnSwitch: true });
       const second = new AppController(fakeApi().api);
-      expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: false, installOnSwitch: true, publishNew: true, switchRow: 0 });
+      expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: true, installOnSwitch: true, publishNew: true, switchRow: 0 });
     } finally { vi.unstubAllGlobals(); }
   });
   it('linhas dinâmicas: até 4, remoção ajusta qual ramo será o atual', () => {

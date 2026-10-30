@@ -51,6 +51,15 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await service.switchBranch(f.repo, 'origin/DDVENDAS-999-main', 'block');
     expect((await service.status(f.repo)).upstream).toBe('origin/DDVENDAS-999-main');
   });
+  it('busca apenas o ramo acompanhado sem trocar o ramo local', async () => {
+    const f = await fixture(); const service = new GitService();
+    const before = await git(f.repo, 'rev-parse', 'HEAD');
+    await git(f.remote, 'update-ref', `refs/heads/${f.source}`, f.base);
+    await service.fetchCurrentBranch(f.repo);
+    expect(await git(f.repo, 'rev-parse', `refs/remotes/origin/${f.source}`)).toBe(f.base);
+    expect(await git(f.repo, 'rev-parse', 'HEAD')).toBe(before);
+    expect(await git(f.repo, 'branch', '--show-current')).toBe(f.source);
+  });
   it('status, staging literal, unstage, diff, commit somente dos selecionados e push', async () => {
     const f = await fixture(); const service = new GitService();
     await writeFile(path.join(f.repo, '[a].txt'), 'arquivo literal'); await writeFile(path.join(f.repo, 'a.txt'), 'outro arquivo');
@@ -79,6 +88,21 @@ describe('Git real: troca, arquivos, histórico e isolamento', () => {
     await expect(git(f.repo, 'show', 'HEAD:novo.txt')).rejects.toThrow();
     expect(await readFile(path.join(f.repo, 'README.md'), 'utf8')).toBe('versão final\n');
     expect((await service.status(f.repo)).files.map(f => f.path)).toEqual(['README.md', 'novo.txt']);
+  });
+  it('cancela o commit quando o staging muda depois da revisão final', async () => {
+    const f = await fixture(); const service = new GitService();
+    await writeFile(path.join(f.repo, 'README.md'), 'conteúdo revisado\n');
+    await service.stage(f.repo, ['README.md'], false);
+    const review = await service.prepareCommit(f.repo);
+    expect(review.diff).toContain('+conteúdo revisado');
+    const before = await git(f.repo, 'rev-parse', 'HEAD');
+    await writeFile(path.join(f.repo, 'README.md'), 'conteúdo alterado fora do aplicativo\n');
+    await git(f.repo, 'add', 'README.md');
+    await expect(service.commit(f.repo, 'Mensagem', review)).rejects.toThrow('mudaram desde a revisão');
+    expect(await git(f.repo, 'rev-parse', 'HEAD')).toBe(before);
+    const updated = await service.prepareCommit(f.repo);
+    await service.commit(f.repo, 'Mensagem', updated);
+    expect(await git(f.repo, 'show', 'HEAD:README.md')).toBe('conteúdo alterado fora do aplicativo');
   });
   it('preserva os bytes UTF-8 com acentos ao preparar e criar um commit', async () => {
     const f = await fixture(); const service = new GitService();

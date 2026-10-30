@@ -1,6 +1,7 @@
-import { access, lstat, readFile, rm, stat } from 'node:fs/promises';
+import { access, copyFile, lstat, readFile, rm, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import type { BatchResult, Branch, Commit, CommitDetail, FileChange, PullRequestInfo, Status, SwitchMode, SwitchResult } from '../../src/models/domain';
+import { randomUUID } from 'node:crypto';
+import type { BatchResult, Branch, Commit, CommitDetail, CommitReview, FileChange, PullRequestInfo, Status, SwitchMode, SwitchResult } from '../../src/models/domain';
 import { azureRepoWebUrl, pullRequestCreateUrl } from './azure';
 import { hash, ref } from '../../src/models/validation';
 import { redact, runGit, runProcess } from './processRunner';
@@ -68,6 +69,18 @@ export class GitService {
       const remote = fullRef.startsWith('refs/remotes/');
       return [{ ref: fullRef, name: fullRef.replace(/^refs\/(heads|remotes)\//, ''), remote, current: current === '*', upstream: upstream ?? '' }];
     });
+  }
+  async fetchCurrentBranch(repo: string): Promise<Branch[]> {
+    const status = await this.status(repo);
+    if (status.branch.startsWith('(')) throw new Error('Selecione um ramo local antes de buscar suas atualizações.');
+    const remotes = (await this.git(repo, ['remote'])).trim().split('\n').filter(Boolean).sort((a, b) => b.length - a.length);
+    const trackedRemote = remotes.find(remote => status.upstream?.startsWith(`${remote}/`));
+    const remote = trackedRemote ?? (remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : null);
+    if (!remote) throw new Error('Configure um remoto para este ramo antes de buscar atualizações.');
+    const branch = trackedRemote ? status.upstream!.slice(remote.length + 1) : status.branch;
+    this.report(repo, `Buscando ${branch} em ${remote}…`);
+    await this.git(repo, ['fetch', '--no-tags', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`]);
+    return this.branches(repo);
   }
   async resolveBranch(repo: string, value: string): Promise<{ name: string; remote?: string; remoteBranch?: string }> {
     ref.parse(value);
@@ -323,11 +336,33 @@ export class GitService {
     }
     await Promise.all(untracked.map(file => rm(file, { recursive: true, force: true })));
   }
-  async commit(repo: string, message: string) {
+  async prepareCommit(repo: string): Promise<CommitReview> {
     const status = await this.ensureIdle(repo, false);
-    if (!message.trim()) throw new Error('Informe uma mensagem para o commit.');
     if (!status.files.some(f => f.index !== ' ' && f.index !== '?')) throw new Error('Selecione os arquivos para o commit.');
-    await this.git(repo, ['commit', '-m', message]);
+    const head = await this.head(repo).catch(() => null);
+    const tree = (await this.git(repo, ['write-tree'])).trim();
+    const diff = await this.git(repo, ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-renames', '--']);
+    const names = await this.git(repo, ['diff', '--cached', '--name-only', '-z', '--']);
+    if ((await this.git(repo, ['write-tree'])).trim() !== tree || await this.head(repo).catch(() => null) !== head) throw new Error('O staging mudou durante a revisão. Abra a revisão final novamente.');
+    return { tree, head, diff, files: names.split('\0').filter(Boolean) };
+  }
+  async commit(repo: string, message: string, review?: Pick<CommitReview, 'tree' | 'head'>) {
+    if (!message.trim()) throw new Error('Informe uma mensagem para o commit.');
+    const expected = review ?? await this.prepareCommit(repo);
+    const current = await this.prepareCommit(repo);
+    if (current.tree !== expected.tree || current.head !== expected.head) throw new Error('As alterações preparadas mudaram desde a revisão. Abra a revisão final novamente.');
+    const indexPath = (await this.git(repo, ['rev-parse', '--git-path', 'index'])).trim();
+    const originalIndex = path.resolve(repo, indexPath);
+    const snapshotIndex = path.join(path.dirname(originalIndex), `index.ramos-${randomUUID()}`);
+    await copyFile(originalIndex, snapshotIndex);
+    try {
+      const environment = { GIT_INDEX_FILE: snapshotIndex };
+      const runSnapshot = (args: string[]) => runProcess('git', ['-c', 'core.quotepath=false', ...args], repo, undefined, 120000, undefined, environment);
+      if ((await runSnapshot(['write-tree'])).trim() !== expected.tree || await this.head(repo).catch(() => null) !== expected.head) throw new Error('As alterações preparadas mudaram durante a confirmação. Abra a revisão final novamente.');
+      // Hooks podem alterar o índice depois da confirmação. Este fluxo confirma exatamente a árvore revisada.
+      await runSnapshot(['-c', `core.hooksPath=${snapshotIndex}.no-hooks`, 'commit', '-m', message]);
+      if (await this.head(repo).then(head => this.git(repo, ['rev-parse', `${head}^{tree}`])).then(value => value.trim()) !== expected.tree) throw new Error('Um hook alterou o conteúdo do commit. Confira o último commit antes de continuar.');
+    } finally { await unlink(snapshotIndex).catch(() => {}); }
   }
   async pushInfo(repo: string): Promise<{ remote: string; remoteBranch: string }> {
     const name = (await this.git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim();

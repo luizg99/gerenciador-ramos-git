@@ -45,7 +45,7 @@ export function App({ controller: c }: { controller: AppController }) {
       <div className="sidebar-label">Repositório</div><nav>{navigation.filter(item => item.tab === 'gemini' ? c.useGemini : item.tab === 'jira' ? c.useJira : item.tab === 'pr' ? c.useAzure : true).map(item => <button key={item.tab} aria-label={item.label} disabled={(item.tab !== 'gemini' && item.tab !== 'jira' && !repo) || vm.busy} className={[vm.tab === item.tab ? 'selected' : '', item.tab === 'gemini' ? 'gemini-nav' : '', item.tab === 'jira' ? 'jira-nav' : ''].join(' ')} onClick={() => c.selectTab(item.tab)}><span aria-hidden="true">{item.icon}</span>{item.label}{item.tab === 'commit' && !!vm.status?.files.length && <b>{vm.status.files.length}</b>}</button>)}</nav>
       <button className={`settings-link ${vm.tab === 'projects' ? 'selected' : ''}`} onClick={() => c.selectTab('projects')} disabled={vm.busy}>▣ Pastas de projetos</button><button className={`settings-link ${vm.tab === 'settings' ? 'selected' : ''}`} onClick={() => c.selectTab('settings')} disabled={vm.busy}>⚙ Configurações</button><div className="sidebar-footer"><ThemePicker c={c} disabled={vm.busy}/><span>v{packageJson.version}</span></div>
     </aside>
-    <main>{!['jira', 'gemini'].includes(vm.tab) && <header className="topbar"><div className="topbar-title">{repo ? <nav className="crumbs" aria-label="Caminho do projeto" title={repo.path}>{crumbs(repo.path, vm.snapshot.settings.roots).map((part, i, all) => i === all.length - 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}<i>/</i></span>)}</nav> : <strong>Nenhum projeto selecionado</strong>}{vm.status && <span className="branch-badge" title="Ramo atual">⑂ {vm.status.branch}</span>}{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado local do repositório">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy} onClick={c.fetch} title="Busca ramos e commits novos do remoto (git fetch)">⇣ Buscar do remoto</button>}</div></header>}
+    <main>{!['jira', 'gemini'].includes(vm.tab) && <header className="topbar"><div className="topbar-title">{repo ? <nav className="crumbs" aria-label="Caminho do projeto" title={repo.path}>{crumbs(repo.path, vm.snapshot.settings.roots).map((part, i, all) => i === all.length - 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}<i>/</i></span>)}</nav> : <strong>Nenhum projeto selecionado</strong>}{vm.status && <span className="branch-badge" title="Ramo atual">⑂ {vm.status.branch}</span>}{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado local do repositório">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy || !vm.status || vm.status.branch.startsWith('(')} onClick={c.fetch} title={`Busca apenas ${vm.status?.upstream ?? vm.status?.branch ?? 'o ramo atual'} no servidor (git fetch)`}>⇣ Buscar da {vm.status?.upstream?.split('/').slice(1).join('/') || vm.status?.branch || 'ramo atual'}</button>}</div></header>}
       <div className="page"><div className="page-heading"><div className="page-heading-top"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1>{vm.tab === 'projects' && <button type="button" className="primary" disabled={vm.busy} onClick={() => setCloneOpen(true)}>＋ Clonar repositório</button>}</div><p>{({ settings: 'Preferências do aplicativo, lembradas neste computador.', projects: 'Escolha as pastas onde ficam seus repositórios.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Revise as alterações, descarte o que não deve entrar e crie o commit.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Crie os pull requests no Azure com as mensagens dos commits na descrição.', gemini: 'Prepare a documentação da entrega com o Gem da equipe.', jira: 'Revise e execute o encerramento das tarefas no Jira.' })[vm.tab]}</p></div>
       {vm.error && <div className="alert error" role="alert"><strong>Não foi possível concluir</strong><p>{vm.error}</p><button onClick={() => c.set({ error: '' })}>Fechar</button></div>}
       {vm.notice && <div className="alert success" role="status">{vm.notice}</div>}
@@ -180,10 +180,10 @@ function Switch({ c, vm }: Props) {
         : creating ? <button className="primary" disabled={!validName || !base || blocked} onClick={c.createBranch}>Criar ramo e trocar →</button> : <button className="primary" disabled={!target || blocked} onClick={c.switchBranch}>{c.installOnSwitch ? 'Trocar ramo e instalar →' : 'Trocar ramo →'}</button>}</div></section>;
 }
 function PullRequest({ c, vm }: Props) {
-  const missingIssueDialog = useRef<HTMLDialogElement>(null);
+  const confirmationDialog = useRef<HTMLDialogElement>(null);
   const jiraInput = useRef<HTMLInputElement>(null);
   const create = () => {
-    if (!vm.jiraIssue.trim()) missingIssueDialog.current?.showModal();
+    if (!vm.jiraIssue.trim() || vm.dynamicPr && skippedRows > 0) confirmationDialog.current?.showModal();
     else void c.createPullRequests();
   };
   const info = vm.prInfo;
@@ -199,20 +199,25 @@ function PullRequest({ c, vm }: Props) {
   };
   const single = check(vm.prSource, vm.prTarget);
   const rows = vm.prRows.map(row => check(row.source, row.target));
+  const readyRows = rows.filter(row => row.ready);
+  const skippedRows = rows.filter(row => !row.source || !row.target).length;
+  const activeCount = vm.dynamicPr ? readyRows.length : single.ready ? 1 : 0;
   const pairs = rows.map(r => `${r.source}→${r.target}`);
-  const rowsReady = rows.every((r, i) => r.ready && pairs.indexOf(pairs[i]) === i);
+  const rowsReady = readyRows.length > 0 && rows.every((r, i) => !r.source || !r.target || r.ready && pairs.indexOf(pairs[i]) === i);
   return <><section className="card switch-card">
-    <dialog ref={missingIssueDialog} className="issue-dialog" aria-labelledby="missing-issue-title">
-      <h2 id="missing-issue-title">Issue Jira não informada</h2>
-      <p>O campo Issue Jira está vazio. Deseja prosseguir com a criação dos PRs sem vincular uma issue?</p>
+    <dialog ref={confirmationDialog} className="issue-dialog" aria-labelledby="pr-confirm-title">
+      <h2 id="pr-confirm-title">Confirmar criação dos PRs</h2>
+      {!vm.jiraIssue.trim() && <p>A Issue Jira está vazia; os PRs serão criados sem vinculá-la.</p>}
+      {vm.dynamicPr && skippedRows > 0 && <p>{skippedRows} {skippedRows === 1 ? 'linha está incompleta' : 'linhas estão incompletas'} e não {skippedRows === 1 ? 'terá' : 'terão'} PR criado. Somente os {readyRows.length} {readyRows.length === 1 ? 'par preenchido será enviado' : 'pares preenchidos serão enviados'}.</p>}
       <div className="card-actions">
-        <button autoFocus onClick={() => { missingIssueDialog.current?.close(); jiraInput.current?.focus(); }}>Voltar e preencher</button>
-        <button className="primary" onClick={() => { missingIssueDialog.current?.close(); void c.createPullRequests(); }}>Prosseguir sem issue</button>
+        <button autoFocus onClick={() => { confirmationDialog.current?.close(); if (!vm.jiraIssue.trim()) jiraInput.current?.focus(); }}>Voltar</button>
+        <button className="primary" onClick={() => { confirmationDialog.current?.close(); void c.createPullRequests(); }}>Criar {activeCount} {activeCount === 1 ? 'PR' : 'PRs'}</button>
       </div>
     </dialog>
     <div className="summary"><span>Azure Repos <strong>{info.webUrl.replace(/^https?:\/\//, '')}</strong></span></div>
     <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
     <label className="manual-check dynamic-toggle"><input type="checkbox" checked={vm.dynamicPr} onChange={e => c.set({ dynamicPr: e.target.checked })}/>PR dinâmico <small>(até 4 de uma vez)</small></label>
+    <div className="pr-preferences"><label className="manual-check"><input type="checkbox" checked={vm.rememberPrDestinations} onChange={e => c.setRememberPrDestinations(e.target.checked)}/>Lembrar destino</label><button type="button" className="quiet" onClick={c.clearPrSources}>Limpar origens</button><button type="button" className="quiet" onClick={c.clearPrTargets}>Limpar destinos</button></div>
     {vm.dynamicPr ? <div className="batch">
       {vm.prRows.map((row, index) => <div className="batch-row pr-row" key={index}>
         <span className="step-number">{index + 1}</span>
@@ -230,7 +235,7 @@ function PullRequest({ c, vm }: Props) {
       {single.source && single.target && single.source === single.target && <p className="inline-warning">Origem e destino precisam ser diferentes.</p>}
     </>}
     <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição inclui as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages). O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
-      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${vm.prRows.length} ${vm.prRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
+      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
         : <button className="primary" disabled={!single.ready} onClick={create}>Criar pull request no Azure</button>}</div>
   </section><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
 }
@@ -238,9 +243,9 @@ function ReviewComposer({ c, vm }: Props) {
   const preview = c.reviewPreview;
   let issueError = '';
   try { parseJiraIssue(vm.jiraIssue); } catch (error) { issueError = (error as Error).message; }
-  const pairs = vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }];
+  const pairs = (vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }]).filter(pair => pair.source.trim() && pair.target.trim());
   return <section className="card review-composer">
-    <div className="card-heading"><div><h2>Mensagem para revisão</h2><p className="hint">Depois de criar os PRs no Azure, os links são consultados pela origem e pelo destino.</p></div><button disabled={!!issueError || pairs.some(pair => !pair.source.trim() || !pair.target.trim())} onClick={c.findPullRequests}>Buscar PRs e gerar mensagem</button></div>
+    <div className="card-heading"><div><h2>Mensagem para revisão</h2><p className="hint">Depois de criar os PRs no Azure, os links são consultados pela origem e pelo destino.</p></div><button disabled={!!issueError || !pairs.length} onClick={c.findPullRequests}>Buscar PRs e gerar mensagem</button></div>
     {issueError && <p className="inline-warning padded">{issueError}</p>}
     {preview ? <><div className="review-message" aria-label="Prévia da mensagem"><p>{greeting()}, tarefa finalizada, disponível para revisão.</p>{preview.issue && <p>Issue do Jira:<br/><ReviewLink c={c} url={preview.issue.url} label={preview.issue.key}/></p>}<p>PRs:</p>{preview.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url} label={prLabel(pr.url)}/></p>)}</div><div className="card-actions"><p className="hint">Cole com Ctrl+V para manter os códigos do Jira e dos PRs como links. A saudação usa o horário local no momento da cópia.</p><button className="primary" onClick={c.copyReview}>Copiar mensagem</button></div></> : <p className="hint padded">Os links finais e o texto aparecerão aqui. Sem Issue Jira, a mensagem terá a saudação e a lista de PRs.</p>}
   </section>;
@@ -361,10 +366,21 @@ function Changes({ c, vm }: Props) {
       </div>}
     </div>}
     <div className="commit-form"><textarea aria-label="Mensagem do commit" rows={3} placeholder="Mensagem do commit" value={vm.commitMessage} onChange={e => c.set({ commitMessage: e.target.value })}/>
-      <div className="card-actions"><span className="hint">{stagedCount} de {files.length} arquivos no commit. Apenas as alterações preparadas serão incluídas.</span><button onClick={c.push} title="Envia os commits locais para o upstream do ramo (ou origin, se ainda não configurado)">↑ Enviar{vm.status?.ahead ? ` (${vm.status.ahead})` : ''}</button><button className="primary" disabled={!stagedCount || !vm.commitMessage.trim() || vm.busy} onClick={c.commit}>Criar commit</button></div></div>
+      <div className="card-actions"><span className="hint">{stagedCount} de {files.length} arquivos no commit. Apenas as alterações preparadas serão incluídas.</span><button onClick={c.push} title="Envia os commits locais para o upstream do ramo (ou origin, se ainda não configurado)">↑ Enviar (push){vm.status?.ahead ? ` (${vm.status.ahead})` : ''}</button><button className="primary" disabled={!stagedCount || !vm.commitMessage.trim() || vm.busy} onClick={c.prepareCommit}>Revisar commit</button></div></div>
   </section>
-  <section className="card diff-card">{vm.workingFile ? <><div className="card-heading"><h2>{vm.workingFile}</h2>{files.some(f => f.path === vm.workingFile && isStaged(f) && f.worktree !== ' ') ? <div className="segmented"><button className={!vm.workingStaged ? 'active' : ''} onClick={() => c.showWorkingDiff(vm.workingFile, false)}>No arquivo</button><button className={vm.workingStaged ? 'active' : ''} onClick={() => c.showWorkingDiff(vm.workingFile, true)}>Já preparadas</button></div> : null}</div>{allBlocks.length > 0 && <><div className="diff-selection-actions"><span className="hint">{selectedBlocks.length} de {allBlocks.length} mudanças selecionadas</span><button onClick={() => setSelectedBlocks(selectedBlocks.length === allBlocks.length ? [] : allBlocks)}>{selectedBlocks.length === allBlocks.length ? 'Limpar seleção' : 'Selecionar todas'}</button><button className="danger" disabled={!selectedBlocks.length || vm.busy} onClick={() => setConfirmBlocks(true)}>Descartar mudanças</button></div>{confirmBlocks && <div className="confirm-discard" role="alertdialog" aria-label="Confirmar descarte de mudanças"><p>Descartar permanentemente {selectedBlocks.length} {selectedBlocks.length === 1 ? 'mudança selecionada' : 'mudanças selecionadas'} de <strong>{vm.workingFile}</strong>? O arquivo será alterado e as mudanças desaparecerão do diff. <strong>Não dá para desfazer.</strong></p><div><button onClick={() => setConfirmBlocks(false)}>Cancelar</button><button className="danger-solid" onClick={() => { setConfirmBlocks(false); void c.editBlocks(selectedBlocks, 'discard'); }}>Descartar selecionadas</button></div></div>}</>}<Diff value={vm.workingDiff || 'Nenhuma alteração nesta comparação.'} selectedBlocks={selectedBlocks} onToggleBlock={selectableDiff ? toggleBlock : undefined}/></> : <div className="empty"><span className="empty-symbol">±</span><p>Selecione um arquivo para ver as alterações.</p></div>}</section></div>;
+  <section className="card diff-card">{vm.workingFile ? <><div className="card-heading"><h2>{vm.workingFile}</h2>{files.some(f => f.path === vm.workingFile && isStaged(f) && f.worktree !== ' ') ? <div className="segmented"><button className={!vm.workingStaged ? 'active' : ''} onClick={() => c.showWorkingDiff(vm.workingFile, false)}>No arquivo</button><button className={vm.workingStaged ? 'active' : ''} onClick={() => c.showWorkingDiff(vm.workingFile, true)}>Já preparadas</button></div> : null}</div>{allBlocks.length > 0 && <><div className="diff-selection-actions"><span className="hint">{selectedBlocks.length} de {allBlocks.length} mudanças selecionadas</span><button onClick={() => setSelectedBlocks(selectedBlocks.length === allBlocks.length ? [] : allBlocks)}>{selectedBlocks.length === allBlocks.length ? 'Limpar seleção' : 'Selecionar todas'}</button><button className="danger" disabled={!selectedBlocks.length || vm.busy} onClick={() => setConfirmBlocks(true)}>Descartar mudanças</button></div>{confirmBlocks && <div className="confirm-discard" role="alertdialog" aria-label="Confirmar descarte de mudanças"><p>Descartar permanentemente {selectedBlocks.length} {selectedBlocks.length === 1 ? 'mudança selecionada' : 'mudanças selecionadas'} de <strong>{vm.workingFile}</strong>? O arquivo será alterado e as mudanças desaparecerão do diff. <strong>Não dá para desfazer.</strong></p><div><button onClick={() => setConfirmBlocks(false)}>Cancelar</button><button className="danger-solid" onClick={() => { setConfirmBlocks(false); void c.editBlocks(selectedBlocks, 'discard'); }}>Descartar selecionadas</button></div></div>}</>}<Diff value={vm.workingDiff || 'Nenhuma alteração nesta comparação.'} selectedBlocks={selectedBlocks} onToggleBlock={selectableDiff ? toggleBlock : undefined}/></> : <div className="empty"><span className="empty-symbol">±</span><p>Selecione um arquivo para ver as alterações.</p></div>}</section>{vm.commitReview && <CommitReviewDialog c={c} vm={vm}/>}</div>;
 }
+function CommitReviewDialog({ c, vm }: Props) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { dialog.current?.showModal(); return () => { if (dialog.current?.open) dialog.current.close(); }; }, []);
+  const review = vm.commitReview!;
+  return <dialog ref={dialog} className="commit-review-dialog" aria-labelledby="commit-review-title" onCancel={event => { event.preventDefault(); if (!vm.busy) c.cancelCommitReview(); }}>
+    <div className="commit-review-heading"><div><h2 id="commit-review-title">Revisão final do commit</h2><p>Estas são todas as alterações preparadas que entrarão no commit.</p></div><button type="button" aria-label="Fechar revisão" onClick={c.cancelCommitReview} disabled={vm.busy}>×</button></div>
+    <div className="commit-review-content"><p><strong>Mensagem:</strong> {vm.commitReviewMessage}</p><p><strong>{review.files.length} {review.files.length === 1 ? 'arquivo' : 'arquivos'}:</strong> {review.files.join(', ')}</p><p className="hint">Para garantir este conteúdo, os hooks locais de commit não serão executados.</p><Diff value={review.diff}/></div>
+    <div className="commit-review-actions"><button type="button" onClick={c.cancelCommitReview} disabled={vm.busy}>Voltar</button><button type="button" className="primary" onClick={c.commit} disabled={vm.busy}>Confirmar e criar commit</button></div>
+  </dialog>;
+}
+
 function Cherry({ c, vm }: Props) {
   const execution = c.execution;
   const outcome = execution?.cancelledAt ? { title: 'Última sequência cancelada', label: 'Cancelada', tone: 'cancelled' }

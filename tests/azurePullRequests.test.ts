@@ -4,6 +4,21 @@ const webUrl = 'https://totvstfs.visualstudio.com/Linha-Winthor/_git/VA41-PCSIS4
 const info = { webUrl, remote: 'origin', remoteUrl: webUrl, defaultTarget: 'master' };
 const pull = (target: string, id: number) => ({ pullRequestId: id, sourceRefName: 'refs/heads/hotfix/DDVENDAS-61611', targetRefName: `refs/heads/${target}`, status: 'active' });
 describe('Consulta automática de PRs Azure', () => {
+  it('sugere os quatro ramos com push mais recente, em ordem cronológica', async () => {
+    const push = (name: string, date: string) => ({ date, refUpdates: [{ name: `refs/heads/${name}` }] });
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ value: [
+      push('fifth', '2026-10-30T15:00:00Z'), push('fourth', '2026-10-30T14:00:00Z'),
+      push('third', '2026-10-30T13:00:00Z'), push('second', '2026-10-30T12:00:00Z'),
+      push('first', '2026-10-30T11:00:00Z'), push('fourth', '2026-10-29T14:00:00Z'),
+      push('deleted', '2026-10-30T16:00:00Z')
+    ] }));
+    const branches = ['first', 'second', 'third', 'fourth', 'fifth'].map(name => `origin/${name}`);
+    const result = await new AzurePullRequests(async () => 'Bearer token', request).recentPushBranches('repo', info, branches);
+    expect(result).toEqual(['second', 'third', 'fourth', 'fifth']);
+    const url = new URL(String(request.mock.calls[0][0]));
+    expect(url.pathname).toContain('/_apis/git/repositories/VA41-PCSIS4139/pushes');
+    expect(url.searchParams.get('searchCriteria.includeRefUpdates')).toBe('true');
+  });
   it('cria três PRs por POST com descrição dos commits e reutiliza os existentes ao repetir', async () => {
     const saved = new Map<string, any>(); const bodies: any[] = [];
     const request = vi.fn<typeof fetch>(async (input, options) => {

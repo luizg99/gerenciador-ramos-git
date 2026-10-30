@@ -30,6 +30,31 @@ export function gitAuthorization(repo: string, webUrl: string): Promise<string> 
 const responseSchema = z.object({ value: z.array(z.object({ pullRequestId: z.number().int().positive(), sourceRefName: z.string(), targetRefName: z.string(), status: z.string() })) });
 export class AzurePullRequests {
   constructor(private authorization = gitAuthorization, private request: typeof fetch = fetch) {}
+  async recentPushBranches(repo: string, info: PullRequestInfo, remoteBranches: string[]): Promise<string[]> {
+    if (!info.webUrl || !info.remote) return [];
+    const web = new URL(info.webUrl);
+    const marker = web.pathname.indexOf('/_git/');
+    if (web.protocol !== 'https:' || marker < 0) return [];
+    const url = new URL(`${web.origin}${web.pathname.slice(0, marker)}/_apis/git/repositories/${web.pathname.slice(marker + 6)}/pushes`);
+    url.search = new URLSearchParams({ 'api-version': '7.1', '$top': '200', 'searchCriteria.includeRefUpdates': 'true' }).toString();
+    const authorization = await this.authorization(repo, info.webUrl);
+    const response = await this.request(url, { headers: { Authorization: authorization, Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(30000) });
+    if (!response.ok) return [];
+    const parsed = z.object({ value: z.array(z.object({ date: z.string(), refUpdates: z.array(z.object({ name: z.string() })).optional() })) }).safeParse(await response.json());
+    if (!parsed.success) return [];
+    const available = new Set(remoteBranches.filter(name => name.startsWith(`${info.remote}/`)).map(name => name.slice(info.remote!.length + 1)));
+    const latest = new Map<string, number>();
+    for (const push of parsed.data.value) {
+      const time = Date.parse(push.date);
+      if (!Number.isFinite(time)) continue;
+      for (const refUpdate of push.refUpdates ?? []) {
+        if (!refUpdate.name.startsWith('refs/heads/')) continue;
+        const name = refUpdate.name.slice('refs/heads/'.length);
+        if (available.has(name) && time > (latest.get(name) ?? -Infinity)) latest.set(name, time);
+      }
+    }
+    return [...latest].sort((a, b) => b[1] - a[1]).slice(0, 4).reverse().map(([name]) => name);
+  }
   async create(repo: string, info: PullRequestInfo, input: { source: string; target: string }[], describe: (source: string, target: string) => Promise<string>): Promise<CreatedPullRequests> {
     const pairs = prPairsSchema.parse(input);
     if (!info.webUrl || !info.remote) throw new Error('O remoto deste repositório não é do Azure DevOps.');

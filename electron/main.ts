@@ -92,10 +92,16 @@ function registerIpc() {
   handle('app:select', z.tuple([id]), id => controller.exclusive(() => controller.select(id)));
   handle('git:status', z.tuple([id]), id => controller.git.status(controller.repository(id)));
   handle('git:branches', z.tuple([id, z.boolean()]), (id, fetch) => fetch ? controller.mutate(id, repo => controller.git.branches(repo, true)) : controller.git.branches(controller.repository(id)));
+  handle('git:fetchCurrentBranch', z.tuple([id]), id => controller.mutate(id, repo => controller.git.fetchCurrentBranch(repo)));
   handle('git:switch', z.tuple([id, ref, z.enum(['block', 'carry', 'stash']), z.boolean()]), (id, branch, mode, install) => controller.mutate(id, repo => controller.git.switchBranch(repo, branch, mode, install)));
   handle('git:createBranch', z.tuple([id, ref, ref, z.enum(['block', 'carry', 'stash']), z.boolean(), z.boolean()]), (id, name, base, mode, publish, install) => controller.mutate(id, repo => controller.git.createBranch(repo, name, base, mode, publish, install)));
   handle('git:createBranches', z.tuple([id, z.array(z.object({ name: ref, base: ref })).min(1).max(4), z.number().int().min(0).max(3).nullable(), z.enum(['block', 'carry', 'stash']), z.boolean(), z.boolean()]), (id, items, switchTo, mode, publish, install) => controller.mutate(id, repo => controller.git.createBranches(repo, items, switchTo, mode, publish, install)));
   handle('git:pullRequestInfo', z.tuple([id]), id => controller.git.pullRequestInfo(controller.repository(id)));
+  handle('git:recentPushBranches', z.tuple([id]), async id => {
+    const repo = controller.repository(id);
+    const [info, branches] = await Promise.all([controller.git.pullRequestInfo(repo), controller.git.branches(repo)]);
+    return new AzurePullRequests().recentPushBranches(repo, info, branches.filter(branch => branch.remote).map(branch => branch.name));
+  });
   handle('reviews:history', z.tuple([]), () => controller.reviews.history());
   handle('reviews:updateIssue', z.tuple([z.string().uuid(), z.string().max(4096)]), (messageId, issue) => controller.exclusive(() => controller.reviews.updateIssue(messageId, issue)));
   handle('reviews:openLink', z.tuple([z.string().max(8192).url().refine(value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password; } catch { return false; } })]), url => shell.openExternal(url));
@@ -126,7 +132,9 @@ function registerIpc() {
   handle('git:editBlocks', z.tuple([id, text, z.boolean(), z.array(z.object({ hunk: z.number().int().min(0), block: z.number().int().min(0) })).min(1).max(2000), z.enum(['stage', 'unstage', 'discard']), z.string().max(2000000)]), (id, file, staged, selections, action, diff) => controller.exclusive(() => controller.git.editBlocks(controller.repository(id), file, staged, selections, action, diff)));
   handle('git:cancelOperation', z.tuple([id]), id => controller.mutate(id, repo => controller.git.cancelOperation(repo)));
   handle('git:discard', z.tuple([id, z.array(text).min(1).max(10000)]), (id, files) => controller.mutate(id, repo => controller.git.discard(repo, files)));
-  handle('git:commit', z.tuple([id, z.string().min(1).max(20000)]), (id, message) => controller.mutate(id, repo => controller.git.commit(repo, message)));
+  const commitReviewSchema = z.object({ tree: hash, head: hash.nullable() });
+  handle('git:prepareCommit', z.tuple([id]), id => controller.mutate(id, repo => controller.git.prepareCommit(repo)));
+  handle('git:commit', z.tuple([id, z.string().min(1).max(20000), commitReviewSchema]), (id, message, review) => controller.mutate(id, repo => controller.git.commit(repo, message, review)));
   handle('git:push', z.tuple([id]), id => controller.mutate(id, repo => controller.git.push(repo)));
   handle('git:cherryPick', z.tuple([id, planSchema]), (id, plan) => controller.mutate(id, repo => controller.cherry.start(repo, plan)));
   handle('git:cancelCherryPick', z.tuple([id, z.string().uuid()]), (id, executionId) => controller.mutate(id, repo => controller.cherry.cancel(repo, executionId)));
