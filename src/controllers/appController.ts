@@ -343,11 +343,11 @@ export class AppController {
     this.set({ manualConfirmed: false, notice: result.finished ? 'Sequência concluída e enviada.' : 'Confira o estado da sequência.' });
   }, true);
   cancelOperation = () => this.action(async () => { await this.api.cancelOperation(this.id); this.set({ notice: 'Operação Git cancelada.' }); }, true, 'Cancelando operação…');
-  // Abre o TortoiseGit sem travar a tela e bloqueia novos cliques por 4 s, para não abrir várias janelas.
+  // Abre o TortoiseGit sem travar a tela e bloqueia novos cliques por 3 s, para não abrir várias janelas.
   openTortoise = async (command: 'commit' | 'log', options?: TortoiseOptions) => {
     if (this.state.tortoiseLocked || !this.repository) return;
     this.set({ tortoiseLocked: true, tortoiseOpened: false, error: '' });
-    setTimeout(() => this.set({ tortoiseLocked: false, tortoiseOpened: false }), 4000);
+    setTimeout(() => this.set({ tortoiseLocked: false, tortoiseOpened: false }), 3000);
     try { await this.api.openTortoise(this.id, command, options); this.set({ tortoiseOpened: true }); }
     catch (error) { this.set({ error: (error as Error).message, tortoiseLocked: false, tortoiseOpened: false }); }
   };

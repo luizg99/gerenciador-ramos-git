@@ -104,7 +104,7 @@ describe('AppController', () => {
     expect(createBranches).toHaveBeenCalledWith(a.id, [{ name: 'x', base: 'main' }, { name: 'y', base: 'x' }], 1, 'block', true, false);
     expect(c.getSnapshot().branchRows).toHaveLength(4);
   });
-  it('abre o TortoiseGit uma vez e bloqueia novos cliques por 4 segundos', async () => {
+  it('abre o TortoiseGit uma vez e bloqueia novos cliques por 3 segundos', async () => {
     vi.useFakeTimers();
     try {
       const openTortoise = vi.fn(async () => {});
@@ -114,7 +114,7 @@ describe('AppController', () => {
       expect(openTortoise).toHaveBeenCalledTimes(1);
       expect(c.getSnapshot().tortoiseLocked).toBe(true);
       expect(c.getSnapshot().tortoiseOpened).toBe(true);
-      vi.advanceTimersByTime(4000);
+      vi.advanceTimersByTime(3000);
       expect(c.getSnapshot().tortoiseLocked).toBe(false);
       await c.openTortoise('commit');
       expect(openTortoise).toHaveBeenCalledTimes(2);
