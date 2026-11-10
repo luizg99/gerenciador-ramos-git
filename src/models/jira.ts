@@ -1,5 +1,14 @@
 export const JIRA_BASE = 'https://jiraproducao.totvs.com.br';
 export const JIRA_HOME_URL = `${JIRA_BASE}/secure/Dashboard.jspa`;
+// Único endpoint fora de /rest/api/2/ que o app usa: é o que o Jira usa para marcar/desmarcar o impedimento (Flagged).
+export const JIRA_FLAG_PATH = '/rest/greenhopper/1.0/xboard/issue/flag/flag.json';
+export const isAllowedJiraPath = (path: string) => !path.includes('..') && (path.startsWith('/rest/api/2/') || path === JIRA_FLAG_PATH);
+// Impedido = campo Flagged com a opção "Impediment" (aceita também o nome em português).
+export function isImpeded(issue: { fields: Record<string, unknown> }, flagFieldId: string | null | undefined) {
+  if (!flagFieldId) return false;
+  const value = issue.fields[flagFieldId];
+  return (Array.isArray(value) ? value : value ? [value] : []).some(item => /imped/i.test(typeof item === 'string' ? item : String((item as { value?: string; name?: string })?.value ?? (item as { name?: string })?.name ?? '')));
+}
 export interface JiraBounds { x: number; y: number; width: number; height: number }
 export interface JiraBrowserState { phase: 'loading' | 'ready' | 'error'; message: string; url?: string }
 export type JiraMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -42,7 +51,7 @@ export function parsePrLinks(value = ''): string[] {
     for (const match of line.matchAll(/https?:\/\/[^\s<>|\]\)]+/g)) {
       const url = match[0].replace(/[.,;]+$/, '');
       if (!/\/_git\/[^/]+\/pullrequest\/[1-9]\d*\/?(?:[?#].*)?$/i.test(url)) continue;
-      const prefix = line.slice(0, match.index).trim().replace(/^[-*]\s*/, '');
+      const prefix = line.slice(0, match.index).trim().replace(/^[-*]\s*/, '').replace(/<$/, '').trim();
       const target = /^([^:<>]+):\s*$/.exec(prefix)?.[1]?.trim();
       if (!links.has(url)) links.set(url, target ? `${target}: ${url}` : url);
     }

@@ -106,6 +106,14 @@ nav b{margin-left:auto;font-size:11px;font-weight:600;border-radius:10px;backgro
 .jira-field>span{display:block;font-size:12px;margin-bottom:5px}
 .jira-field input,.jira-field textarea,.jira-field select{width:100%}
 .jira-pr-links{min-height:78px;resize:vertical;line-height:1.5}
+.jira-impeded{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:28px 20px;border:1px solid var(--amber);background:var(--warning-bg);border-radius:10px}
+.jira-impeded>span{font-size:26px;color:var(--amber)}
+.jira-impeded h3,.jira-impeded p{margin:0}
+.jira-impeded small{color:var(--muted)}
+.rich-paste{min-height:78px;max-height:320px;overflow:auto;resize:vertical;line-height:1.6;width:100%;background:var(--bg);border:1px solid var(--line-strong);border-radius:6px;padding:10px 12px;color:var(--text);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;outline:none}
+.rich-paste:focus{border-color:var(--accent)}
+.rich-paste:empty:before{content:attr(data-placeholder);color:var(--subtle);pointer-events:none}
+.rich-paste a{color:var(--accent);text-decoration:underline;cursor:pointer}
 .jira-worklog{border:1px solid var(--line);border-radius:5px;margin:5px 0;padding:7px 8px;background:var(--panel-2)}
 .jira-worklog p{font-size:11px;margin:0 0 5px;color:var(--muted);line-height:1.4}
 .jira-worklog p strong{color:var(--text)}

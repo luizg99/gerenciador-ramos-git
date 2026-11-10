@@ -1,5 +1,6 @@
 import { WebContentsView, type BrowserWindow } from 'electron';
-import { JIRA_BASE, JIRA_HOME_URL, type JiraBounds, type JiraBrowserState, type JiraMethod } from '../../src/models/jira';
+import { keepLoginsAcrossRestarts } from './persistentSession';
+import { isAllowedJiraPath, JIRA_BASE, JIRA_HOME_URL, type JiraBounds, type JiraBrowserState, type JiraMethod } from '../../src/models/jira';
 
 export class JiraBrowser {
   private view?: WebContentsView;
@@ -20,6 +21,7 @@ export class JiraBrowser {
     } });
     this.view = view; view.setVisible(false); this.owner.contentView.addChildView(view);
     const contents = view.webContents;
+    keepLoginsAcrossRestarts(contents.session);
     contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     contents.session.setPermissionCheckHandler(() => false);
     const secure = (value: string) => { try { return new URL(value).protocol === 'https:'; } catch { return false; } };
@@ -83,7 +85,7 @@ export class JiraBrowser {
     const contents = this.ensureView().webContents;
     let url: URL;
     try { url = new URL(contents.getURL()); } catch { throw new Error('A sessão do Jira ainda está carregando.'); }
-    if (url.origin !== JIRA_BASE || !path.startsWith('/rest/api/2/') || path.includes('..')) {
+    if (url.origin !== JIRA_BASE || !isAllowedJiraPath(path)) {
       throw new Error('Conclua o login no Jira da equipe antes de carregar os dados.');
     }
     if (contents.isLoadingMainFrame()) throw new Error('Aguarde o Jira terminar de carregar.');

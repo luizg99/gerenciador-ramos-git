@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, nativeTheme } from 'electron';
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, session, shell, nativeTheme } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -13,6 +13,7 @@ import type { Snapshot } from '../src/models/domain';
 import { installTextContextMenu } from './textContextMenu';
 import { GeminiBrowser } from './services/geminiBrowser';
 import { GEM_URL } from '../src/models/gemini';
+import { isAllowedJiraPath } from '../src/models/jira';
 import { JiraBrowser } from './services/jiraBrowser';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 import { openTortoise } from './services/tortoiseGit';
@@ -57,7 +58,7 @@ function registerIpc() {
   handle('jira:state', z.tuple([]), () => jira.getState());
   handle('jira:open', z.tuple([]), () => jira.open());
   handle('jira:request', z.tuple([
-    z.string().min(1).max(4096).refine(value => value.startsWith('/rest/api/2/') && !value.includes('..')),
+    z.string().min(1).max(4096).refine(isAllowedJiraPath),
     z.enum(['GET', 'POST', 'PUT', 'DELETE']), z.unknown().optional()
   ]), (url, method, body) => jira.request(url, method, body));
   handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean().optional(), useGemini: z.boolean().optional(), useJira: z.boolean().optional(), useAzure: z.boolean().optional(), theme: z.enum(['light', 'dark']).optional(), reviewHistoryPath: z.string().min(1).max(4096).optional(), ui: z.object({ azureOrganizationUrl: z.string().max(2048).optional(), dynamicBranches: z.boolean().optional(), installOnSwitch: z.boolean().optional(), rememberPrDestinations: z.boolean().optional(), prDestinations: z.record(z.string().regex(/^[a-f0-9]{24}$/), z.array(z.string().max(500)).max(4)).optional() }).optional() })]), patch => controller.exclusive(async () => {
@@ -150,7 +151,9 @@ async function createWindow() {
   jira = new JiraBrowser(window, state => { if (window && !window.isDestroyed()) window.webContents.send('jira:changed', state); });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
-  window.on('close', event => { if (controller.busy) { event.preventDefault(); void dialog.showMessageBox(window!, { type: 'info', message: 'Aguarde a operação terminar antes de fechar.', detail: 'O progresso está sendo salvo. Fechar agora pode interromper um comando Git.' }); } });
+  // Nos testes automatizados (pasta de dados de teste) não há quem clique em OK; o aviso só vale para quem usa o app.
+  const testMode = !!process.env.RAMOS_TEST_DATA && !app.isPackaged;
+  window.on('close', event => { if (controller.busy && !testMode) { event.preventDefault(); void dialog.showMessageBox(window!, { type: 'info', message: 'Aguarde a operação terminar antes de fechar.', detail: 'O progresso está sendo salvo. Fechar agora pode interromper um comando Git.' }); } });
   if (developmentUrl) await window.loadURL(developmentUrl); else await window.loadFile(path.join(__dirname, '../dist/index.html'));
 }
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -174,5 +177,12 @@ else {
     // A janela abre já; as chamadas IPC aguardam só a leitura das configurações e da lista salva.
     ready = controller.initialize().then(() => applyTheme()); registerIpc(); await createWindow(); await ready;
   }).catch(error => { dialog.showErrorBox('Falha ao iniciar', (error as Error).message); app.quit(); });
-  app.on('window-all-closed', () => app.quit());
+  // Ao fechar a última janela, grava os cookies de login (Gemini e Jira) em disco, para não pedir login de novo na próxima abertura.
+  app.on('window-all-closed', () => {
+    const flush = ['persist:team-gemini', 'persist:team-jira'].map(partition => session.fromPartition(partition).cookies.flushStore().catch(() => {}));
+    let quit = false;
+    const leave = () => { if (!quit) { quit = true; app.quit(); } };
+    void Promise.all(flush).then(leave, leave);
+    setTimeout(leave, 2000);
+  });
 }

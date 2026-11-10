@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { JiraBounds, JiraBrowserState, JiraCurrentUser, JiraFieldMeta, JiraIssue, JiraMethod, JiraTransition, JiraWorklog } from '../models/jira';
 import { greeting } from '../models/reviewMessage';
-import { JIRA_BASE, parseJiraKey, parsePrLinks, originalEstimateSeconds } from '../models/jira';
+import { RichPaste } from './RichPaste';
+import { JIRA_BASE, JIRA_FLAG_PATH, isImpeded, parseJiraKey, parsePrLinks, originalEstimateSeconds } from '../models/jira';
 
 type Role = '' | 'coding' | 'support';
 type Meta = { fields?: Record<string, JiraFieldMeta> };
@@ -34,6 +35,8 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [key, setKey] = useState('');
   const [main, setMain] = useState<JiraIssue>();
+  const [impeded, setImpeded] = useState<{ key: string; summary: string } | null>(null);
+  const flagField = useRef<string | null | undefined>(undefined);
   const [currentUser, setCurrentUser] = useState<JiraCurrentUser>();
   const [related, setRelated] = useState<JiraIssue[]>([]);
   const [ignoredRelatedCount, setIgnoredRelatedCount] = useState(0);
@@ -103,10 +106,23 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     finally { setBusy(false); }
   };
   const updateLog = (entry: string) => setLog(current => [...current, entry]);
-  const loadIssue = () => action(async () => {
-    const issueKey = parseJiraKey(key);
-    const loaded = await request<JiraIssue>(`${issuePath(issueKey)}?fields=summary,description,status,issuetype,project,assignee,parent,subtasks,issuelinks,timeoriginalestimate,aggregatetimeoriginalestimate,timetracking`);
-    setMain(loaded); setKey(loaded.key); setError(''); setNotice(''); setEditingWorklog(null); setDrafts({});
+  // O campo "Flagged" tem um id diferente em cada Jira; descobre pelo nome uma vez e guarda.
+  const flaggedFieldId = async () => {
+    if (flagField.current !== undefined) return flagField.current;
+    try {
+      const fields = await request<{ id: string; name: string }[]>('/rest/api/2/field');
+      flagField.current = toArray<{ id: string; name: string }>(fields).find(field => /^(flagged|sinalizad[oa])$/i.test(field.name.trim()))?.id ?? null;
+    } catch { return null; }
+    return flagField.current;
+  };
+  const loadIssue = () => action(async () => { await loadIssueByKey(parseJiraKey(key)); });
+  const loadIssueByKey = async (issueKey: string, noticePrefix = '') => {
+    const flagId = await flaggedFieldId();
+    const loaded = await request<JiraIssue>(`${issuePath(issueKey)}?fields=summary,description,status,issuetype,project,assignee,parent,subtasks,issuelinks,timeoriginalestimate,aggregatetimeoriginalestimate,timetracking${flagId ? `,${flagId}` : ''}`);
+    setKey(loaded.key); setError(''); setNotice(''); setEditingWorklog(null); setDrafts({});
+    // Tarefa impedida: não mostra os campos do fluxo até o impedimento ser retirado.
+    if (isImpeded(loaded, flagId)) { setMain(undefined); setRelated([]); setImpeded({ key: loaded.key, summary: loaded.fields.summary }); return; }
+    setImpeded(null); setMain(loaded);
     setCurrentUser(await request<JiraCurrentUser>('/rest/api/2/myself').catch(() => undefined));
     const subtaskLinks = toArray<any>(loaded.fields.subtasks);
     const subtaskKeys = new Set(subtaskLinks.map((issue: any) => issue.key));
@@ -118,7 +134,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
       catch { return issue as JiraIssue; }
     }));
     const supportMain = isSupportMain(loaded);
-    setNotice(supportMain ? `Apoio - Cliente ${loaded.key} carregada. As subtarefas são apenas informativas.` : `Tarefa ${loaded.key} carregada. Só as subtarefas do tipo Codificação entram no fluxo.`);
+    setNotice(noticePrefix + (supportMain ? `Apoio - Cliente ${loaded.key} carregada. As subtarefas são apenas informativas.` : `Tarefa ${loaded.key} carregada. Só as subtarefas do tipo Codificação entram no fluxo.`));
     const codingTasks = details.filter(issue => isCodingSubtask(issue) && !isCancelled(issue));
     const supportSubtasks = supportMain ? details.filter(issue => subtaskKeys.has(issue.key)) : [];
     setRelated(supportMain ? supportSubtasks : codingTasks); setIgnoredRelatedCount(supportMain ? 0 : details.length - codingTasks.length);
@@ -157,6 +173,20 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
       const review = meta?.projects?.flatMap(project => project.issuetypes ?? []).find(type => /code review|revis[aã]o de c[oó]digo/i.test(type.name));
       if (review) setCodeReviewType(review.id);
     }
+  };
+  // Consulta o estado atual antes de agir: se o impedimento já foi retirado por fora, só recarrega a tarefa.
+  const releaseImpediment = () => action(async () => {
+    if (!impeded) return;
+    const flagId = await flaggedFieldId();
+    if (!flagId) throw new Error('Não encontrei o campo Flagged neste Jira. Retire o impedimento direto no Jira e recarregue.');
+    const flagged = async () => isImpeded(await request<JiraIssue>(`${issuePath(impeded.key)}?fields=${flagId}`), flagId);
+    const alreadyReleased = !(await flagged());
+    if (!alreadyReleased) {
+      try { await request(JIRA_FLAG_PATH, 'POST', { issueKeys: [impeded.key], flag: false }); }
+      catch { await request(issuePath(impeded.key), 'PUT', { fields: { [flagId]: [] } }); }
+      if (await flagged()) throw new Error('O Jira não removeu o impedimento. Retire-o direto no Jira (menu da tarefa → Remover impedimento) e carregue de novo.');
+    }
+    await loadIssueByKey(impeded.key, alreadyReleased ? 'O impedimento já tinha sido retirado no Jira. ' : 'Impedimento retirado. ');
   });
   const pickedTransitions = (issue: JiraIssue) => transitions[issue.key] ?? [];
   const loggedSeconds = (issue: JiraIssue) => (worklogs[issue.key] ?? []).reduce((total, entry) => total + (Number(entry.timeSpentSeconds) || 0), 0);
@@ -400,7 +430,8 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
         <p className="hint">A sessão é independente da autenticação Git. Faça login no painel Jira ao lado antes de carregar uma tarefa.</p>
         {error && <div className="alert error" role="alert">{error}<button onClick={() => setError('')}>Fechar</button></div>}
         {notice && <div className="alert success" role="status">{notice}</div>}
-        {!main && !busy && <div className="jira-empty"><span aria-hidden="true">☷</span><h3>Comece pela tarefa principal</h3><p>Carregue a tarefa para consultar as subtarefas, registrar LogTimes e preparar o encerramento.</p><small>Você poderá revisar as alterações antes de confirmar o fluxo.</small></div>}
+        {impeded && !busy && <div className="jira-impeded" role="alert"><span aria-hidden="true">⚑</span><h3>Tarefa impedida</h3><p><strong>{impeded.key}</strong>{impeded.summary ? ` — ${impeded.summary}` : ''}</p><p>Essa tarefa está impedida retire o impedimento para prosseguir.</p><button className="primary" onClick={() => void releaseImpediment()}>Retirar impedimento e recarregar</button><small>Se você já retirou o impedimento no Jira, o botão apenas recarrega a tarefa.</small></div>}
+        {!main && !impeded && !busy && <div className="jira-empty"><span aria-hidden="true">☷</span><h3>Comece pela tarefa principal</h3><p>Carregue a tarefa para consultar as subtarefas, registrar LogTimes e preparar o encerramento.</p><small>Você poderá revisar as alterações antes de confirmar o fluxo.</small></div>}
         {main && <>
           <section className="card"><div className="card-heading"><div><h2>{main.key} — {main.fields.summary}</h2><p>{main.fields.issuetype?.name} · {main.fields.status?.name} · {main.fields.assignee?.displayName ?? 'Sem responsável'}</p></div><a href={`${JIRA_BASE}/browse/${encodeURIComponent(main.key)}`} target="_blank" rel="noreferrer">Abrir tarefa ↗</a></div>
             <section aria-label="Estimativas de horas"><h3>Estimativas de horas</h3>{estimatedIssues.map(issue => { const estimate = originalEstimateSeconds(issue); const aggregated = estimate > 0 && !issue.fields.timeoriginalestimate && !issue.fields.timetracking?.originalEstimateSeconds && issue.fields.aggregatetimeoriginalestimate != null; return <label className="jira-field jira-estimate-field" key={issue.key}><span>Estimativa original — {issue.key}{issue.key === main.key ? ' · Tarefa principal' : ''} (horas)</span><input className="jira-estimate-input" type="number" min="0.01" step="any" required aria-label={`Estimativa de horas ${issue.key}`} disabled={busy || estimate > 0} value={estimate > 0 ? estimate / 3600 : estimates[issue.key] ?? ''} onChange={e => setEstimates(current => ({ ...current, [issue.key]: e.target.value }))}/><small>{aggregated ? `Estimativa considerada pelo Jira (${estimate / 3600}h).` : estimate > 0 ? 'Já informada no Jira; não pode ser editada.' : 'Obrigatória. Será salva ao confirmar o fluxo.'}</small></label>; })}</section>
@@ -444,7 +475,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
           {!!coding.length && <section className="card"><h3 className="jira-section">Etapas para encerrar as tarefas de codificação</h3>{coding.map(issue => <label className="jira-field" key={`summary-${issue.key}`}><span>1. Cabeçalho da tarefa de codificação — {issue.key}</span><input aria-label={`Cabeçalho da tarefa de codificação ${issue.key}`} value={codingSummaries[issue.key] ?? ''} onChange={e => setCodingSummaries(current => ({ ...current, [issue.key]: e.target.value }))}/><small>Será atualizado no campo Resumo do Jira.</small></label>)}<label className="jira-field"><span>2. Notes do Gem Dev — serão usadas como descrição de cada tarefa de codificação ao confirmar</span><textarea rows={4} value={notes} onChange={e => setNotes(e.target.value)}/></label><label className="jira-field"><span>3. Texto da IA sem Release Notes — será publicado como comentário</span><textarea rows={5} value={aiText} onChange={e => setAiText(e.target.value)}/></label>
             <label className="jira-field"><span>Causa da ocorrência (opcional) — revise antes de salvar</span><select aria-label="Campo causa da ocorrência (opcional)" value={causeField} onChange={e => setCauseField(e.target.value)}><option value="">Não informar causa</option>{causeOptions.map(([id, field]) => <option key={id} value={id}>{field.name}</option>)}</select><textarea aria-label="Texto opcional da causa da ocorrência" rows={4} value={cause} onChange={e => setCause(e.target.value)} placeholder="Opcional. Se não informar, a tarefa não será alterada nesse campo."/></label>
             <label className="jira-field"><span>Tipo de tarefa para code review</span><select value={codeReviewType} onChange={e => setCodeReviewType(e.target.value)}><option value="">Selecione o tipo de tarefa</option>{createMeta?.projects?.find(project => project.key === main.fields.project?.key)?.issuetypes?.map(type => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label><label className="jira-field"><span>Resumo da tarefa de code review</span><input value={reviewSummary} onChange={e => setReviewSummary(e.target.value)}/></label>{createFieldsForReview.filter(([, field]) => field.required).map(([id, field]) => <label className="jira-field" key={id}><span>{field.name} (obrigatório)</span><input value={String(reviewExtra[id] ?? '')} onChange={e => setReviewExtra(current => ({ ...current, [id]: e.target.value }))}/></label>)}
-            {coding.map(issue => <label className="jira-field" key={`prs-${issue.key}`}><span>Último passo — links dos PRs de {issue.key} (um ou vários)</span><textarea className="jira-pr-links" aria-label={`PRs ${issue.key}`} rows={3} placeholder={'https://.../_git/.../pullrequest/123\nhttps://.../_git/.../pullrequest/456'} value={prs[issue.key] ?? ''} onChange={e => setPrs(current => ({ ...current, [issue.key]: e.target.value }))}/><small>Informe um link por linha. Todos serão incluídos na descrição da tarefa Code Review.</small></label>)}
+            {coding.map(issue => <label className="jira-field" key={`prs-${issue.key}`}><span>Último passo — links dos PRs de {issue.key} (um ou vários)</span><RichPaste label={`PRs ${issue.key}`} placeholder={'Cole aqui a mensagem copiada do app ou os links dos PRs, um por linha.'} value={prs[issue.key] ?? ''} onChange={value => setPrs(current => ({ ...current, [issue.key]: value }))}/><small>Cole a mensagem copiada na aba Criar pull request (os links continuam clicáveis) ou informe um link por linha. Todos serão incluídos na descrição da tarefa Code Review.</small></label>)}
           </section>}
           {supportMain && <section className="card"><h3 className="jira-section">LogTime da tarefa de apoio — {main.key}</h3>{worklogs[main.key]?.map(entry => renderWorklog(main, entry))}{!worklogs[main.key]?.length && <p className="inline-warning">A tarefa principal ainda não possui LogTime. Lance pelo menos um antes de continuar.</p>}<div className="jira-new-worklogs" aria-label={`Novos LogTimes ${main.key}`}>{(newWorklogs[main.key] ?? []).map((draft, index) => <div className="jira-toolbar" key={draft.id}><input aria-label={`Duração novo LogTime ${main.key} ${index + 1}`} placeholder="Duração (ex.: 1h 30m)" value={draft.timeSpent} onChange={e => setNewWorklogs(current => ({ ...current, [main.key]: (current[main.key] ?? []).map(item => item.id === draft.id ? { ...item, timeSpent: e.target.value } : item) }))}/><input type="date" aria-label={`Data novo LogTime ${main.key} ${index + 1}`} value={toDateTimeLocal(draft.started).slice(0, 10)} onChange={e => setNewWorklogs(current => ({ ...current, [main.key]: (current[main.key] ?? []).map(item => item.id === draft.id ? { ...item, started: withDate(e.target.value, item.started) } : item) }))}/><input aria-label={`Comentário novo LogTime ${main.key} ${index + 1}`} placeholder="Descrição do LogTime" value={draft.comment} onChange={e => setNewWorklogs(current => ({ ...current, [main.key]: (current[main.key] ?? []).map(item => item.id === draft.id ? { ...item, comment: e.target.value } : item) }))}/><button disabled={busy || !draft.timeSpent.trim()} onClick={() => void addWorklog(main, draft)}>Lançar LogTime</button><button className="quiet" aria-label={`Remover LogTime novo ${main.key} ${index + 1}`} disabled={busy} onClick={() => setNewWorklogs(current => ({ ...current, [main.key]: (current[main.key] ?? []).filter(item => item.id !== draft.id) }))}>Remover</button></div>)}<button className="quiet" disabled={busy} onClick={() => setNewWorklogs(current => ({ ...current, [main.key]: [...(current[main.key] ?? []), createWorklogDraft()] }))}>+ Adicionar LogTime</button></div></section>}
           {!coding.length && <section className="card"><h3 className="jira-section">Comentário e causa da tarefa principal</h3><label className="jira-field"><span>Texto da IA sem Release Notes — comentário na tarefa principal</span><textarea rows={5} value={aiText} onChange={e => setAiText(e.target.value)}/></label><label className="jira-field"><span>Causa da ocorrência (opcional) — revise antes de salvar</span><select aria-label="Campo causa da ocorrência (opcional)" value={causeField} onChange={e => setCauseField(e.target.value)}><option value="">Não informar causa</option>{causeOptions.map(([id, field]) => <option key={id} value={id}>{field.name}</option>)}</select><textarea aria-label="Texto opcional da causa da ocorrência" rows={4} value={cause} onChange={e => setCause(e.target.value)} placeholder="Opcional. Se não informar, a tarefa não será alterada nesse campo."/></label></section>}

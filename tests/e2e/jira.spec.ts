@@ -13,15 +13,19 @@ test('Jira: cabeçalho, status, responsável, cópia de PR e ações de LogTime'
   const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => typeof value === 'string' && key !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>;
   app = await electron.launch({ args: [path.resolve('.')], env: { ...env, RAMOS_TEST_DATA: data } });
   await app.evaluate(async ({ session }) => {
-    (globalThis as any).jiraFixture = { mainStatus: 'OPEN', codingStatus: 'OPEN', assignee: 'luiz.ramos', worklogs: true, deleted: false, edited: false, transitionPosts: [], writes: [] };
+    (globalThis as any).jiraFixture = { mainStatus: 'OPEN', codingStatus: 'OPEN', assignee: 'luiz.ramos', worklogs: true, deleted: false, edited: false, transitionPosts: [], writes: [], flagged: true, flagCalls: 0 };
     await session.fromPartition('persist:team-jira').protocol.handle('https', async request => {
       const url = new URL(request.url);
+      if (url.pathname === '/rest/greenhopper/1.0/xboard/issue/flag/flag.json') { const fixture = (globalThis as any).jiraFixture; fixture.flagCalls++; fixture.flagged = false; return Response.json({}); }
       if (url.pathname.startsWith('/rest/api/2/')) {
         const fixture = (globalThis as any).jiraFixture;
         const mainKey = 'DDVENDAS-70001'; const codingKey = 'DDVENDAS-70002';
         const user = { displayName: 'Luiz Ramos', name: 'luiz.ramos', key: 'luiz.ramos' };
         const coding = { id: '70002', key: codingKey, self: `${url.origin}/rest/api/2/issue/${codingKey}`, fields: { timeoriginalestimate: 7200, summary: 'Codificação de teste', description: 'Descrição inicial', status: { name: fixture.codingStatus }, issuetype: { id: '11', name: 'Codificação (Sub-tarefa)', subtask: true }, project: { id: '1', key: 'DDVENDAS', name: 'Vendas' }, assignee: fixture.assignee === 'luiz.ramos' ? user : { displayName: 'Outro usuário', name: 'other-user', key: 'other-user' } } };
         if (url.pathname.endsWith('/myself')) return Response.json(user);
+        if (url.pathname === '/rest/api/2/field') return Response.json([{ id: 'customfield_10005', name: 'Flagged' }]);
+        if (url.pathname === `/rest/api/2/issue/${mainKey}` && request.method === 'GET' && url.searchParams.get('fields') === 'customfield_10005') return Response.json({ id: '70001', key: mainKey, fields: { customfield_10005: fixture.flagged ? [{ value: 'Impediment', id: '10019' }] : null } });
+        if (url.pathname === `/rest/api/2/issue/${mainKey}` && fixture.flagged) return Response.json({ id: '70001', key: mainKey, self: `${url.origin}/rest/api/2/issue/${mainKey}`, fields: { summary: 'Tarefa principal de teste', status: { name: 'OPEN' }, issuetype: { id: '10', name: 'Task' }, project: { id: '1', key: 'DDVENDAS', name: 'Vendas' }, customfield_10005: [{ value: 'Impediment', id: '10019' }] } });
         if (url.pathname.endsWith('/createmeta')) return Response.json({ projects: [{ key: 'DDVENDAS', issuetypes: [{ id: '22', name: 'Code Review', subtask: true, fields: {} }] }] });
         if (url.pathname === '/rest/api/2/search') return Response.json({ issues: [] });
         if (url.pathname === '/rest/api/2/issue' && request.method === 'POST') { fixture.reviewBody = await request.json(); fixture.writes.push('create-review'); return Response.json({ key: 'DDVENDAS-70003' }, { status: 201 }); }
@@ -55,6 +59,24 @@ test('Jira: cabeçalho, status, responsável, cópia de PR e ações de LogTime'
   await expect(page.locator('.topbar')).toBeHidden();
   await page.getByLabel('Chave da tarefa principal').fill('DDVENDAS-70001');
   await page.getByRole('button', { name: 'Carregar tarefa', exact: true }).click();
+  // Tarefa impedida (Flagged: Impediment): não mostra os campos e oferece retirar o impedimento.
+  const impediment = page.getByRole('alert').filter({ hasText: 'Tarefa impedida' });
+  await expect(impediment).toContainText('Essa tarefa está impedida retire o impedimento para prosseguir');
+  await expect(page.getByLabel(/Notes do Gem Dev/)).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Revisar e encerrar fluxo' })).toHaveCount(0);
+  // Já retirado por fora do app: o botão só recarrega, sem chamar o Jira para remover de novo.
+  await app.evaluate(() => { (globalThis as any).jiraFixture.flagged = false; });
+  await page.getByRole('button', { name: 'Retirar impedimento e recarregar' }).click();
+  await expect(page.getByText(/O impedimento já tinha sido retirado no Jira\./)).toBeVisible();
+  expect(await app.evaluate(() => (globalThis as any).jiraFixture.flagCalls)).toBe(0);
+  // Ainda impedida: o app retira o impedimento e carrega a tarefa.
+  await app.evaluate(() => { (globalThis as any).jiraFixture.flagged = true; });
+  await page.getByRole('button', { name: 'Carregar tarefa', exact: true }).click();
+  await expect(impediment).toBeVisible();
+  await page.getByRole('button', { name: 'Retirar impedimento e recarregar' }).click();
+  await expect(page.getByText(/Impedimento retirado\./)).toBeVisible();
+  expect(await app.evaluate(() => (globalThis as any).jiraFixture.flagCalls)).toBe(1);
+  await expect(impediment).toHaveCount(0);
   await expect(page.locator('.card-heading').filter({ hasText: 'Tarefa principal de teste' }).getByText('Task · OPEN · Luiz Ramos', { exact: true })).toBeVisible();
   await expect(page.getByText(/somente quando a tarefa principal está com status EM DESENVOLVIMENTO/)).toBeVisible();
   await expect(page.getByLabel(/Notes do Gem Dev/)).toBeHidden();
@@ -101,6 +123,20 @@ test('Jira: cabeçalho, status, responsável, cópia de PR e ações de LogTime'
   await page.screenshot({ path: testInfo.outputPath('jira-compacto.png') });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 940));
   await page.getByLabel(/Texto da IA sem Release Notes/).fill('Resumo para revisão');
+  // Colagem da mensagem copiada no app: mantém os links clicáveis (HTML) e guarda o texto com os links.
+  const prsField = page.getByLabel(/PRs DDVENDAS-70002/);
+  await prsField.click();
+  await prsField.evaluate(element => {
+    const data = new DataTransfer();
+    data.setData('text/html', '<div>Boa tarde, tarefa finalizada.<br><br>PRs:<br><br>main: <a href="https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/321">repo/pullrequest/321</a></div><script>window.invadido = true</script>');
+    data.setData('text/plain', 'texto alternativo');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect(prsField.locator('a')).toHaveAttribute('href', 'https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/321');
+  await expect(prsField.locator('a')).toHaveText('repo/pullrequest/321');
+  await expect(prsField).toContainText('Boa tarde, tarefa finalizada.');
+  await expect(prsField).not.toContainText('invadido');
+  await prsField.fill('');
   await page.getByLabel(/PRs DDVENDAS-70002/).fill('Boa tarde, tarefa finalizada, disponível para revisão.\n\nIssue do Jira:\n<https://jiraproducao.totvs.com.br/browse/DDVENDAS-70001|DDVENDAS-70001>\n\nPRs:\nmain: https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/123');
   await expect(page.getByRole('button', { name: 'Alterar LogTime DDVENDAS-70002 work-1' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Excluir LogTime DDVENDAS-70002 work-1' })).toBeVisible();
