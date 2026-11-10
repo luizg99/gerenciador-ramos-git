@@ -104,21 +104,31 @@ describe('AppController', () => {
     expect(createBranches).toHaveBeenCalledWith(a.id, [{ name: 'x', base: 'main' }, { name: 'y', base: 'x' }], 1, 'block', true, false);
     expect(c.getSnapshot().branchRows).toHaveLength(4);
   });
-  it('abre o TortoiseGit uma vez e bloqueia novos cliques por 3 segundos', async () => {
+  it('fica carregando até a janela do TortoiseGit abrir, mostra "aberto" e só então libera', async () => {
     vi.useFakeTimers();
     try {
-      const openTortoise = vi.fn(async () => {});
+      let windowShown!: () => void;
+      const openTortoise = vi.fn(() => new Promise<void>(resolve => { windowShown = resolve; }));
       const c = new AppController({ openTortoise } as unknown as Api);
       c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
-      await c.openTortoise('log', { rev: 'abc' }); await c.openTortoise('log', { rev: 'def' });
+      const first = c.openTortoise('log', { rev: 'abc' });
+      await c.openTortoise('log', { rev: 'def' });
       expect(openTortoise).toHaveBeenCalledTimes(1);
-      expect(c.getSnapshot().tortoiseLocked).toBe(true);
-      expect(c.getSnapshot().tortoiseOpened).toBe(true);
-      vi.advanceTimersByTime(3000);
-      expect(c.getSnapshot().tortoiseLocked).toBe(false);
-      await c.openTortoise('commit');
+      vi.advanceTimersByTime(60000);
+      expect(c.getSnapshot()).toMatchObject({ tortoiseLocked: true, tortoiseOpened: false });
+      windowShown(); await first;
+      expect(c.getSnapshot()).toMatchObject({ tortoiseLocked: true, tortoiseOpened: true });
+      vi.advanceTimersByTime(1200);
+      expect(c.getSnapshot()).toMatchObject({ tortoiseLocked: false, tortoiseOpened: false });
+      const second = c.openTortoise('commit'); windowShown(); await second;
       expect(openTortoise).toHaveBeenCalledTimes(2);
     } finally { vi.useRealTimers(); }
+  });
+  it('libera o botão e mostra o erro se o TortoiseGit não abrir', async () => {
+    const c = new AppController({ openTortoise: async () => { throw new Error('Não foi possível abrir o TortoiseGit.'); } } as unknown as Api);
+    c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
+    await c.openTortoise('log');
+    expect(c.getSnapshot()).toMatchObject({ tortoiseLocked: false, error: 'Não foi possível abrir o TortoiseGit.' });
   });
   it('linhas dinâmicas: até 4, remoção ajusta qual ramo será o atual', () => {
     const c = new AppController(fakeApi().api);
