@@ -43,7 +43,12 @@ export function safeHtmlFrom(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   let out = '';
   const walk = (node: Node) => {
-    if (node.nodeType === 3) { out += escapeHtml(node.nodeValue ?? ''); return; }
+    if (node.nodeType === 3) {
+      // Como no HTML: qualquer sequência de espaços/quebras vira um espaço, e não sobra espaço no começo da linha.
+      let text = (node.nodeValue ?? '').replace(/[\s\u00a0]+/g, ' ');
+      if (!out || out.endsWith('<br>')) text = text.replace(/^ /, '');
+      out += escapeHtml(text); return;
+    }
     if (node.nodeType !== 1) return;
     const element = node as HTMLElement;
     const tag = element.tagName;
@@ -56,5 +61,5 @@ export function safeHtmlFrom(html: string): string {
     if (block && !out.endsWith('<br>')) out += '<br>';
   };
   doc.body.childNodes.forEach(walk);
-  return out.replace(/(<br>){3,}/g, '<br><br>').replace(/(<br>)+$/, '');
+  return out.replace(/ +(<br>)/g, '$1').replace(/(<br>){3,}/g, '<br><br>').replace(/^(<br>)+/, '').replace(/(<br>)+$/, '').trim();
 }

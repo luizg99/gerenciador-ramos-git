@@ -15,7 +15,7 @@ export function RichPaste({ value, onChange, label, placeholder }: { value: stri
     onPaste={event => {
       event.preventDefault();
       const html = event.clipboardData.getData('text/html');
-      document.execCommand('insertHTML', false, html ? safeHtmlFrom(html) : textToHtml(event.clipboardData.getData('text/plain')));
+      document.execCommand('insertHTML', false, html ? safeHtmlFrom(html) : textToHtml(event.clipboardData.getData('text/plain').trim()));
     }}
     onClick={event => {
       const link = (event.target as HTMLElement).closest('a');

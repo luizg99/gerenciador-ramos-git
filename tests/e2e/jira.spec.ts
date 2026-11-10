@@ -128,7 +128,7 @@ test('Jira: cabeçalho, status, responsável, cópia de PR e ações de LogTime'
   await prsField.click();
   await prsField.evaluate(element => {
     const data = new DataTransfer();
-    data.setData('text/html', '<div>Boa tarde, tarefa finalizada.<br><br>PRs:<br><br>main: <a href="https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/321">repo/pullrequest/321</a></div><script>window.invadido = true</script>');
+    data.setData('text/html', '<html>\n<body>\n<!--StartFragment--><div>\n  Boa tarde, tarefa finalizada.<br><br>PRs:<br><br>\n  main: <a href="https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/321">repo/pullrequest/321</a>\n</div><script>window.invadido = true</script><!--EndFragment-->\n</body>\n</html>');
     data.setData('text/plain', 'texto alternativo');
     element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   });
@@ -136,6 +136,9 @@ test('Jira: cabeçalho, status, responsável, cópia de PR e ações de LogTime'
   await expect(prsField.locator('a')).toHaveText('repo/pullrequest/321');
   await expect(prsField).toContainText('Boa tarde, tarefa finalizada.');
   await expect(prsField).not.toContainText('invadido');
+  // Sem espaço ou linha sobrando no começo/fim, nem quebras de linha soltas do HTML copiado.
+  const pasted = await prsField.evaluate(element => element.innerHTML);
+  expect(pasted).toBe('Boa tarde, tarefa finalizada.<br><br>PRs:<br><br>main: <a href="https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/321">repo/pullrequest/321</a>');
   await prsField.fill('');
   await page.getByLabel(/PRs DDVENDAS-70002/).fill('Boa tarde, tarefa finalizada, disponível para revisão.\n\nIssue do Jira:\n<https://jiraproducao.totvs.com.br/browse/DDVENDAS-70001|DDVENDAS-70001>\n\nPRs:\nmain: https://dev.azure.com/equipe/projeto/_git/repo/pullrequest/123');
   await expect(page.getByRole('button', { name: 'Alterar LogTime DDVENDAS-70002 work-1' })).toBeVisible();
