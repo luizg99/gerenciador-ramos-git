@@ -15,6 +15,7 @@ import { GeminiBrowser } from './services/geminiBrowser';
 import { GEM_URL } from '../src/models/gemini';
 import { JiraBrowser } from './services/jiraBrowser';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
+import { openTortoise } from './services/tortoiseGit';
 let gemini: GeminiBrowser;
 let jira: JiraBrowser;
 let window: BrowserWindow | null = null;
@@ -59,7 +60,7 @@ function registerIpc() {
     z.string().min(1).max(4096).refine(value => value.startsWith('/rest/api/2/') && !value.includes('..')),
     z.enum(['GET', 'POST', 'PUT', 'DELETE']), z.unknown().optional()
   ]), (url, method, body) => jira.request(url, method, body));
-  handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean().optional(), useGemini: z.boolean().optional(), useJira: z.boolean().optional(), useAzure: z.boolean().optional(), theme: z.enum(['light', 'dark']).optional(), reviewHistoryPath: z.string().min(1).max(4096).optional() })]), patch => controller.exclusive(async () => {
+  handle('app:updateSettings', z.tuple([z.object({ usePman: z.boolean().optional(), useGemini: z.boolean().optional(), useJira: z.boolean().optional(), useAzure: z.boolean().optional(), theme: z.enum(['light', 'dark']).optional(), reviewHistoryPath: z.string().min(1).max(4096).optional(), ui: z.object({ azureOrganizationUrl: z.string().max(2048).optional(), dynamicBranches: z.boolean().optional(), installOnSwitch: z.boolean().optional(), rememberPrDestinations: z.boolean().optional(), prDestinations: z.record(z.string().regex(/^[a-f0-9]{24}$/), z.array(z.string().max(500)).max(4)).optional() }).optional() })]), patch => controller.exclusive(async () => {
     const snapshot = await controller.updateSettings(patch);
     applyTheme();
     return snapshot;
@@ -68,6 +69,7 @@ function registerIpc() {
     const chosen = await dialog.showOpenDialog(window!, { title: 'Selecione a pasta do histórico de PR', properties: ['openDirectory'] });
     return chosen.canceled ? controller.snapshot() : controller.updateSettings({ reviewHistoryPath: chosen.filePaths[0] });
   }));
+  handle('app:openTortoise', z.tuple([id, z.enum(['commit', 'log']), z.object({ ref: ref.optional(), rev: hash.optional() }).optional()]), (id, command, options) => openTortoise(command, controller.repository(id), options));
   handle('app:scan', z.tuple([]), () => controller.exclusive(() => controller.scan()));
   handle('app:chooseRoot', z.tuple([]), () => controller.exclusive(async () => {
     const chosen = await dialog.showOpenDialog(window!, { title: 'Selecione a pasta de projetos', properties: ['openDirectory'] });

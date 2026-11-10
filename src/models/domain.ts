@@ -11,7 +11,10 @@ export interface Branch { ref: string; name: string; remote: boolean; current: b
 export interface Commit { hash: string; subject: string; author: string; date: string; parents: string[] }
 export interface CommitDetail { files: string[]; diff: string }
 export interface CommitReview { tree: string; head: string | null; diff: string; files: string[] }
-export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }
+export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string; ui?: UiPreferences }
+export interface UiPreferences { azureOrganizationUrl?: string; dynamicBranches?: boolean; installOnSwitch?: boolean; rememberPrDestinations?: boolean; prDestinations?: Record<string, string[]> }
+export type SettingsPatch = { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string; ui?: UiPreferences }
+export interface TortoiseOptions { ref?: string; rev?: string }
 export interface CherryPlan { source: string; commits: string[]; targets: string[] }
 export type Phase = 'pending' | 'switching' | 'pman' | 'applying' | 'pushing' | 'done' | 'failed' | 'interrupted';
 export interface TargetRun {
@@ -46,7 +49,8 @@ export interface Api {
   chooseReviewHistoryFolder(): Promise<Snapshot>;
   removeRoot(root: string): Promise<Snapshot>;
   scan(): Promise<Snapshot>;
-  updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }): Promise<Snapshot>;
+  updateSettings(patch: SettingsPatch): Promise<Snapshot>;
+  openTortoise(id: string, command: 'commit' | 'log', options?: TortoiseOptions): Promise<void>;
   selectRepository(id: string): Promise<void>;
   status(id: string): Promise<Status>;
   branches(id: string, fetch: boolean): Promise<Branch[]>;

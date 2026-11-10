@@ -20,24 +20,24 @@ function fakeApi() {
 }
 describe('AppController', () => {
   it('abre quatro PRs, ignora linhas incompletas e lembra destinos somente quando marcado', async () => {
-    const store = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); }, removeItem: (key: string) => { store.delete(key); } });
-    try {
-      const createPullRequests = vi.fn(async () => ({ prs: [{ source: 'feature', target: 'main', url: 'https://dev.azure.com/org/project/_git/repo/pullrequest/1', created: true }] }));
-      const api = { createPullRequests, reviewHistory: async () => [] } as unknown as Api;
-      const c = new AppController(api);
-      c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
-      expect(c.getSnapshot().prRows).toHaveLength(4);
-      c.setPrRow(0, { source: 'feature', target: 'main' });
-      c.setPrRow(1, { source: 'other' });
-      c.setRememberPrDestinations(true);
-      await c.createPullRequests();
-      expect(createPullRequests).toHaveBeenCalledWith(a.id, [{ source: 'feature', target: 'main' }], '');
-      expect(c.getSnapshot().prRows.map(row => row.target)).toEqual(['main', '', '', '']);
-      c.setRememberPrDestinations(false);
-      expect(c.getSnapshot().prRows.every(row => !row.target)).toBe(true);
-      expect(store.get(`prDestinations:${a.id}`)).toBe('[]');
-    } finally { vi.unstubAllGlobals(); }
+    const createPullRequests = vi.fn(async () => ({ prs: [{ source: 'feature', target: 'main', url: 'https://dev.azure.com/org/project/_git/repo/pullrequest/1', created: true }] }));
+    const updateSettings = vi.fn(async () => ({ settings: { roots: [] }, repositories: [], executions: [] }));
+    const api = { createPullRequests, updateSettings, reviewHistory: async () => [] } as unknown as Api;
+    const c = new AppController(api);
+    c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
+    expect(c.getSnapshot().prRows).toHaveLength(4);
+    c.setPrRow(0, { source: 'feature', target: 'main' });
+    c.setPrRow(1, { source: 'other' });
+    c.setRememberPrDestinations(true);
+    expect(updateSettings).toHaveBeenCalledWith({ ui: { rememberPrDestinations: true } });
+    await c.createPullRequests();
+    expect(createPullRequests).toHaveBeenCalledWith(a.id, [{ source: 'feature', target: 'main' }], '');
+    expect(c.getSnapshot().prRows.map(row => row.target)).toEqual(['main', '', '', '']);
+    expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual({ [a.id]: ['main'] });
+    expect(updateSettings).toHaveBeenLastCalledWith({ ui: { prDestinations: { [a.id]: ['main'] } } });
+    c.setRememberPrDestinations(false);
+    expect(c.getSnapshot().prRows.every(row => !row.target)).toBe(true);
+    expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual({ [a.id]: [] });
   });
   it('preenche as origens com pushes recentes sem sobrescrever uma limpeza feita pelo usuário', async () => {
     let finishRecent!: (branches: string[]) => void;
@@ -81,39 +81,43 @@ describe('AppController', () => {
     c.setSource('outro'); c.selectTab('switch'); c.selectTab('cherry');
     expect(c.getSnapshot().source).toBe('outro');
   });
-  it('marca e desmarca arquivos na hora e sincroniza com o Git em segundo plano, em ordem', async () => {
-    const files = [{ path: 'a.txt', index: ' ', worktree: 'M' }, { path: 'novo.txt', index: '?', worktree: '?' }];
-    const calls: string[] = []; let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
-    const api = {
-      snapshot: async () => ({ settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] }),
-      status: vi.fn(async () => ({ ...status('main'), files: [{ path: 'a.txt', index: 'M', worktree: ' ' }, { path: 'novo.txt', index: '?', worktree: '?' }] })),
-      branches: async () => [],
-      stage: vi.fn(async (_id: string, paths: string[], unstage: boolean) => { calls.push(`${unstage ? '-' : '+'}${paths.join()}`); await gate; }),
-      onProgress: () => () => {}, onSnapshot: () => () => {}
-    } as unknown as Api;
+  it('lembra os checks e a organização Azure entre aberturas, lendo do settings.json', async () => {
+    const saved = { roots: [], activeRepository: a.id, ui: { dynamicBranches: true, installOnSwitch: true, rememberPrDestinations: true, azureOrganizationUrl: 'https://totvstfs.visualstudio.com/Linha-Winthor', prDestinations: { [a.id]: ['main'] } } };
+    const first = new AppController(fakeApi().api);
+    expect(first.getSnapshot()).toMatchObject({ dynamicBranches: false, dynamicPr: true, installOnSwitch: false, rememberPrDestinations: false, publishNew: true });
+    expect(first.getSnapshot().prRows).toHaveLength(4);
+    const api = { snapshot: async () => ({ settings: saved, repositories: [a], executions: [] }), status: async () => status('main'), branches: async () => [], onProgress: () => () => {}, onSnapshot: () => () => {} } as unknown as Api;
+    const second = new AppController(api); second.connect();
+    await vi.waitFor(() => expect(second.getSnapshot().loadingRepository).toBe(false));
+    expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: true, installOnSwitch: true, rememberPrDestinations: true, publishNew: true, switchRow: 0 });
+    expect(second.azureOrganizationUrl).toBe('https://totvstfs.visualstudio.com/Linha-Winthor');
+  });
+  it('criação dinâmica começa com 4 linhas e ignora as vazias ao criar', async () => {
+    const createBranches = vi.fn(async () => ({ created: ['x', 'y'], published: [], failures: [] }));
+    const api = { ...fakeApi().api, createBranches, snapshot: async () => ({ settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] }), status: async () => status('main'), branches: async () => [] } as unknown as Api;
     const c = new AppController(api); c.connect();
     await vi.waitFor(() => expect(c.getSnapshot().loadingRepository).toBe(false));
-    c.set({ status: { ...status('main'), files } });
-    const done = [c.stage(['a.txt']), c.stage(['novo.txt']), c.stage(['novo.txt'], true)];
-    const now = c.getSnapshot();
-    expect(now.busy).toBe(false);
-    expect(now.status?.files).toEqual([{ path: 'a.txt', index: 'M', worktree: ' ' }, { path: 'novo.txt', index: '?', worktree: '?' }]);
-    await vi.waitFor(() => expect(calls).toEqual(['+a.txt']));
-    release(); await Promise.all(done);
-    expect(calls).toEqual(['+a.txt', '+novo.txt', '-novo.txt']);
-    await vi.waitFor(() => expect(api.status).toHaveBeenCalledTimes(2));
+    expect(c.getSnapshot().branchRows).toHaveLength(4);
+    c.setBranchRow(1, { name: 'x' }); c.setBranchRow(3, { name: ' y ', base: 'x' });
+    c.set({ switchRow: 3 });
+    await c.createBranches();
+    expect(createBranches).toHaveBeenCalledWith(a.id, [{ name: 'x', base: 'main' }, { name: 'y', base: 'x' }], 1, 'block', true, false);
+    expect(c.getSnapshot().branchRows).toHaveLength(4);
   });
-  it('lembra os checks entre aberturas e começa com tudo desmarcado', () => {
-    const store = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } });
+  it('abre o TortoiseGit uma vez e bloqueia novos cliques por 5 segundos', async () => {
+    vi.useFakeTimers();
     try {
-      const first = new AppController(fakeApi().api);
-      expect(first.getSnapshot()).toMatchObject({ dynamicBranches: false, dynamicPr: true, installOnSwitch: false, publishNew: true });
-      expect(first.getSnapshot().prRows).toHaveLength(4);
-      first.set({ dynamicBranches: true, installOnSwitch: true });
-      const second = new AppController(fakeApi().api);
-      expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: true, installOnSwitch: true, publishNew: true, switchRow: 0 });
-    } finally { vi.unstubAllGlobals(); }
+      const openTortoise = vi.fn(async () => {});
+      const c = new AppController({ openTortoise } as unknown as Api);
+      c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
+      await c.openTortoise('log', { rev: 'abc' }); await c.openTortoise('log', { rev: 'def' });
+      expect(openTortoise).toHaveBeenCalledTimes(1);
+      expect(c.getSnapshot().tortoiseLocked).toBe(true);
+      vi.advanceTimersByTime(5000);
+      expect(c.getSnapshot().tortoiseLocked).toBe(false);
+      await c.openTortoise('commit');
+      expect(openTortoise).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
   });
   it('linhas dinâmicas: até 4, remoção ajusta qual ramo será o atual', () => {
     const c = new AppController(fakeApi().api);

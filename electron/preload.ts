@@ -35,6 +35,7 @@ const api: Api = {
   listGitHubRepositories: (source, enterpriseUrl) => call('app:listGitHubRepositories', source, enterpriseUrl) as ReturnType<Api['listGitHubRepositories']>,
   chooseReviewHistoryFolder: () => call('app:chooseReviewHistoryFolder') as ReturnType<Api['chooseReviewHistoryFolder']>,
   removeRoot: root => call('app:removeRoot', root) as ReturnType<Api['removeRoot']>,
+  openTortoise: (id, command, options) => call('app:openTortoise', id, command, options) as Promise<void>,
   scan: () => call('app:scan') as ReturnType<Api['scan']>,
   updateSettings: patch => call('app:updateSettings', patch) as ReturnType<Api['updateSettings']>,
   selectRepository: id => call('app:select', id) as Promise<void>,

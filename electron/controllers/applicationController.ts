@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
-import type { Repository, Settings, Snapshot } from '../../src/models/domain';
+import type { Repository, Settings, SettingsPatch, Snapshot } from '../../src/models/domain';
 import { isRepository, scanRepositories } from '../services/repositoryScanner';
 import { Storage } from '../services/storage';
 import { GitService, type Reporter } from '../services/gitService';
@@ -42,10 +42,12 @@ export class ApplicationController {
     await this.storage.saveSettings(this.settings); return this.scan();
   }
   async removeRoot(root: string) { this.settings.roots = this.settings.roots.filter(r => r !== root); await this.storage.saveSettings(this.settings); return this.scan(); }
-  async updateSettings(patch: { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string }) {
+  async updateSettings(patch: SettingsPatch) {
     const previousSettings = { ...this.settings };
     if (Object.prototype.hasOwnProperty.call(patch, 'reviewHistoryPath')) await this.storage.configureReviewHistoryDirectory(patch.reviewHistoryPath);
-    Object.assign(this.settings, patch);
+    const { ui, ...rest } = patch;
+    Object.assign(this.settings, rest);
+    if (ui) this.settings.ui = { ...this.settings.ui, ...ui };
     if (patch.usePman !== undefined) this.git.usePman = patch.usePman;
     try { await this.storage.saveSettings(this.settings); }
     catch (error) {

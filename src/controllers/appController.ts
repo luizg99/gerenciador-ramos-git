@@ -1,62 +1,62 @@
-import type { Api, Branch, CloneSource, Commit, CommitDetail, CommitReview, Execution, FileChange, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode } from '../models/domain';
+import type { Api, Branch, CloneSource, Commit, Execution, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode, TortoiseOptions, UiPreferences } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
 export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira';
 export interface ViewModel {
   snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
-  switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[]; detail?: CommitDetail; selectedCommit: string;
-  selectedCommitFile: string;
+  switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[];
+  tortoiseLocked: boolean;
   source: string; sourceCommits: Commit[]; selectedCommits: string[]; targets: string[]; review: boolean;
-  commitMessage: string; workingFile: string; workingStaged: boolean; workingDiff: string; progress: Progress[];
-  commitReview?: CommitReview; commitReviewMessage?: string;
+  progress: Progress[];
   manualConfirmed: boolean; loadingRepository: boolean;
   createBase: string; publishNew: boolean; installOnSwitch: boolean; prInfo?: PullRequestInfo; prSource: string; prTarget: string;
   dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; rememberPrDestinations: boolean;
   jiraIssue: string; prUrl: string; reviewMessages: ReviewMessage[]; reviewSearch: string; generatedReview?: ReviewMessage;
 }
-// Estado esperado de um arquivo logo após marcar/desmarcar, até o status real chegar.
-function optimistic(f: FileChange, unstage: boolean): FileChange {
-  if (unstage) return f.index === 'A' ? { ...f, index: '?', worktree: '?' } : { ...f, index: ' ', worktree: f.worktree !== ' ' ? f.worktree : f.index };
-  return f.index === '?' ? { ...f, index: 'A', worktree: ' ' } : { ...f, index: f.worktree !== ' ' ? f.worktree : f.index, worktree: ' ' };
-}
 export interface BranchRow { name: string; base: string }
 export interface PrRow { source: string; target: string; url?: string }
-// Checks lembrados entre aberturas (só nesta máquina). Na primeira vez, todos desmarcados.
+// Checks lembrados entre aberturas: ficam no settings.json (não dependem do armazenamento do navegador).
 const preferenceKeys = ['dynamicBranches', 'installOnSwitch', 'rememberPrDestinations'] as const;
 const emptyPrRows = (targets: string[] = []): PrRow[] => Array.from({ length: 4 }, (_, index) => ({ source: '', target: targets[index] ?? '' }));
-function loadPreferences(): Partial<ViewModel> {
-  try {
-    const saved = JSON.parse(localStorage.getItem('preferences') ?? '{}') as Record<string, unknown>;
-    return Object.fromEntries(preferenceKeys.filter(key => typeof saved[key] === 'boolean').map(key => [key, saved[key]]));
-  } catch { return {}; }
-}
-function savePreferences(state: ViewModel) {
-  try { localStorage.setItem('preferences', JSON.stringify(Object.fromEntries(preferenceKeys.map(key => [key, state[key]])))); } catch { /* sem armazenamento: só não lembra */ }
-}
+const emptyBranchRows = (): BranchRow[] => Array.from({ length: 4 }, () => ({ name: '', base: '' }));
 export class AppController {
-  private readonly initialPreferences = loadPreferences();
+  private hydrated = false;
   private listeners = new Set<() => void>();
   private loadToken = 0;
   private prLoadToken = 0;
   private prSourcesVersion = 0;
-  private stageQueue: Promise<void> = Promise.resolve();
-  private pendingStages = 0;
   private state: ViewModel = {
     snapshot: { settings: { roots: [] }, repositories: [], executions: [] }, tab: 'switch', busy: false, busyMessage: '', error: '', notice: '', branches: [],
-    switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], selectedCommit: '', selectedCommitFile: '', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
-    commitMessage: '', workingFile: '', workingStaged: false, workingDiff: '', progress: [], manualConfirmed: false, loadingRepository: false,
+    switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
+    progress: [], manualConfirmed: false, loadingRepository: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
-    dynamicBranches: false, branchRows: [{ name: '', base: '' }], switchRow: this.initialPreferences.dynamicBranches ? 0 : null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false,
-    jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: '',
-    ...this.initialPreferences
+    dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false,
+    jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: ''
   };
   constructor(private api: Api) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.state;
   set(patch: Partial<ViewModel>) {
     this.state = { ...this.state, ...patch }; this.listeners.forEach(l => l());
-    if (preferenceKeys.some(key => key in patch)) savePreferences(this.state);
+    const changed = preferenceKeys.filter(key => key in patch);
+    if (changed.length) this.savePreferences(Object.fromEntries(changed.map(key => [key, this.state[key]])));
   }
+  // Grava no settings.json sem bloquear a tela; o estado local é atualizado na hora.
+  private savePreferences(patch: UiPreferences) {
+    const snapshot = this.state.snapshot;
+    this.state = { ...this.state, snapshot: { ...snapshot, settings: { ...snapshot.settings, ui: { ...snapshot.settings.ui, ...patch } } } };
+    void Promise.resolve(this.api.updateSettings?.({ ui: patch })).catch(() => {});
+  }
+  // Na primeira carga, aplica as preferências salvas.
+  private hydrate(snapshot: Snapshot) {
+    if (this.hydrated) return;
+    this.hydrated = true;
+    const ui = snapshot.settings.ui ?? {};
+    const dynamicBranches = ui.dynamicBranches ?? false;
+    this.state = { ...this.state, dynamicBranches, installOnSwitch: ui.installOnSwitch ?? false, rememberPrDestinations: ui.rememberPrDestinations ?? false, switchRow: dynamicBranches ? 0 : null };
+  }
+  get azureOrganizationUrl() { return this.state.snapshot.settings.ui?.azureOrganizationUrl ?? ''; }
+  saveAzureOrganization = (value: string) => { const url = value.trim(); if (url && url !== this.azureOrganizationUrl) this.savePreferences({ azureOrganizationUrl: url }); };
   get id() { const id = this.state.snapshot.settings.activeRepository; if (!id) throw new Error('Selecione um projeto.'); return id; }
   get repository() { return this.state.snapshot.repositories.find(r => r.id === this.state.snapshot.settings.activeRepository); }
   get execution(): Execution | undefined { return this.state.snapshot.executions.find(e => e.repoPath === this.repository?.path); }
@@ -70,8 +70,9 @@ export class AppController {
       }
     });
     const unsubscribeSnapshot = this.api.onSnapshot(snapshot => this.applySnapshot(snapshot));
-    // Detecta alterações feitas fora do app (editor, terminal): consulta periódica na aba Commitar e ao voltar o foco para a janela.
-    const timer = setInterval(() => { if (this.state.tab === 'commit') void this.pollStatus(); }, 2000);
+    // Detecta alterações feitas fora do app (editor, TortoiseGit): a cada 1 s na aba de commit, a cada 5 s nas outras e ao voltar o foco.
+    let tick = 0;
+    const timer = setInterval(() => { tick++; if (this.state.tab === 'commit' || tick % 5 === 0) void this.pollStatus(); }, 1000);
     const onFocus = () => { void this.pollStatus(); };
     const hasWindow = typeof window !== 'undefined';
     if (hasWindow) window.addEventListener('focus', onFocus);
@@ -80,20 +81,13 @@ export class AppController {
   private polling = false;
   // Atualização silenciosa: só mexe na tela se o status (ou o diff aberto) realmente mudou.
   private async pollStatus() {
-    if (this.polling || this.state.busy || this.state.loadingRepository || this.pendingStages || typeof document !== 'undefined' && document.hidden || !this.repository || !this.state.status) return;
+    if (this.polling || this.state.busy || this.state.loadingRepository || typeof document !== 'undefined' && document.hidden || !this.repository || !this.state.status) return;
     this.polling = true;
     const id = this.id;
     try {
       const status = await this.api.status(id);
-      if (this.pendingStages || this.state.busy || this.repository?.id !== id) return;
+      if (this.state.busy || this.repository?.id !== id) return;
       if (JSON.stringify(status) !== JSON.stringify(this.state.status)) this.set({ status });
-      const { workingFile } = this.state;
-      if (!workingFile) return;
-      const file = status.files.find(f => f.path === workingFile);
-      if (!file) { this.set({ workingFile: '', workingDiff: '' }); return; }
-      const staged = this.state.workingStaged && file.index !== ' ' && file.index !== '?' || file.worktree === ' ' && file.index !== ' ' && file.index !== '?';
-      const diff = await this.api.workingDiff(id, workingFile, staged);
-      if (this.repository?.id === id && this.state.workingFile === workingFile && !this.pendingStages && (diff !== this.state.workingDiff || staged !== this.state.workingStaged)) this.set({ workingDiff: diff, workingStaged: staged });
     } catch { /* falhas transitórias (ex.: git ocupado) são ignoradas; a próxima consulta tenta de novo */ }
     finally { this.polling = false; }
   }
@@ -115,7 +109,7 @@ export class AppController {
   // Cada carga invalida as anteriores: se o usuário trocar de projeto no meio, o resultado antigo é descartado.
   private async refreshData() {
     const token = ++this.loadToken;
-    const snapshot = await this.api.snapshot(); if (token !== this.loadToken) return; this.set({ snapshot });
+    const snapshot = await this.api.snapshot(); if (token !== this.loadToken) return; this.hydrate(snapshot); this.set({ snapshot });
     if (!this.repository) { this.set({ status: undefined, branches: [] }); return; }
     const [status, branches] = await Promise.all([this.api.status(this.id), this.api.branches(this.id, false)]);
     if (token === this.loadToken) this.set({ status, branches });
@@ -159,10 +153,10 @@ export class AppController {
     await this.api.selectRepository(id);
     this.prSourcesVersion++;
     this.set({ jiraIssue: '', prUrl: '', generatedReview: undefined });
-    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', detail: undefined, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), workingFile: '', workingDiff: '', commitMessage: '', progress: [], manualConfirmed: false, tab: 'switch' });
+    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: emptyBranchRows(), switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
-  selectTab = (tab: Tab) => { this.set({ tab, detail: undefined, selectedCommit: '' }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
+  selectTab = (tab: Tab) => { this.set({ tab }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
   // No cherry-pick, a origem já começa no ramo atual; o usuário pode trocar.
   private prefillSource() {
     const branch = this.state.status?.branch;
@@ -184,16 +178,20 @@ export class AppController {
   }, true, 'Criando ramo…');
   private savedPrDestinations(id: string): string[] {
     if (!this.state.rememberPrDestinations) return [];
-    try { const value = JSON.parse(localStorage.getItem(`prDestinations:${id}`) ?? '[]'); return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 4) : []; } catch { return []; }
+    const value = this.state.snapshot.settings.ui?.prDestinations?.[id];
+    return Array.isArray(value) ? value.slice(0, 4) : [];
+  }
+  private storePrDestinations(id: string, destinations: string[]) {
+    this.savePreferences({ prDestinations: { ...this.state.snapshot.settings.ui?.prDestinations, [id]: destinations } });
   }
   setRememberPrDestinations = (enabled: boolean) => {
     this.set({ rememberPrDestinations: enabled, ...(enabled ? {} : { prTarget: '', prRows: this.state.prRows.map(row => ({ ...row, target: '', url: undefined })) }) });
-    if (!enabled) try { localStorage.setItem(`prDestinations:${this.id}`, '[]'); } catch { /* preferência local indisponível */ }
+    if (!enabled) this.storePrDestinations(this.id, []);
   };
   clearPrSources = () => { this.prSourcesVersion++; this.set({ prSource: '', prRows: this.state.prRows.map(row => ({ ...row, source: '', url: undefined })) }); };
   clearPrTargets = () => {
     this.set({ prTarget: '', prRows: this.state.prRows.map(row => ({ ...row, target: '', url: undefined })) });
-    try { localStorage.removeItem(`prDestinations:${this.id}`); } catch { /* armazenamento local indisponível */ }
+    this.storePrDestinations(this.id, []);
   };
   // Pull request: quatro pares disponíveis, com destinos lembrados somente quando solicitado.
   private async loadPullRequest() {
@@ -224,16 +222,22 @@ export class AppController {
     const rows = this.state.branchRows.filter((_, i) => i !== index); const current = this.state.switchRow;
     this.set({ branchRows: rows.length ? rows : [{ name: '', base: '' }], switchRow: current === null ? null : current === index ? rows.length ? 0 : null : current > index ? current - 1 : current });
   };
+  // Linhas sem nome são ignoradas; o índice do ramo a trocar acompanha a lista filtrada.
+  private filledBranchRows() {
+    const filled = this.state.branchRows.map((row, index) => ({ row, index })).filter(({ row }) => row.name.trim());
+    const switchIndex = filled.findIndex(({ index }) => index === this.state.switchRow);
+    return { items: filled.map(({ row }) => ({ name: row.name.trim(), base: row.base.trim() || (this.state.status?.branch ?? '') })), switchTo: switchIndex < 0 ? null : switchIndex };
+  }
   toggleSwitchRow = (index: number) => this.set({ switchRow: this.state.switchRow === index ? null : index });
   createBranches = () => this.action(async () => {
-    const current = this.state.status?.branch ?? '';
-    const items = this.state.branchRows.map(row => ({ name: row.name.trim(), base: row.base.trim() || current }));
-    const result = await this.api.createBranches(this.id, items, this.state.switchRow, this.state.switchMode, this.state.publishNew, this.installOnSwitch);
+    const { items, switchTo } = this.filledBranchRows();
+    if (!items.length) throw new Error('Informe o nome de ao menos um ramo.');
+    const result = await this.api.createBranches(this.id, items, switchTo, this.state.switchMode, this.state.publishNew, this.installOnSwitch);
     const parts = [`Ramos criados: ${result.created.join(', ')}.`];
     if (result.published.length) parts.push(`Enviados para o remoto: ${result.published.join(', ')}.`);
     if (result.branch) parts.push(`Ramo atual: ${result.branch}${this.installOnSwitch ? ', dependências instaladas' : ''}.`);
     if (result.stash) parts.push(`Stash preservado: ${result.stash.slice(0, 10)}.`);
-    this.set({ notice: parts.join(' '), branchRows: [{ name: '', base: '' }], switchRow: this.state.dynamicBranches ? 0 : null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
+    this.set({ notice: parts.join(' '), branchRows: emptyBranchRows(), switchRow: this.state.dynamicBranches ? 0 : null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
   }, true, 'Criando ramos…');
   // PR dinâmico: até 4 pares origem → destino, abertos de uma vez.
   setPrRow = (index: number, patch: Partial<PrRow>) => { if ('source' in patch) this.prSourcesVersion++; this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch, url: undefined } : row) }); };
@@ -301,7 +305,7 @@ export class AppController {
     else this.set({ prUrl: urlFor(pairs[0]) ?? '' });
     if (!result.error) {
       const destinations = this.state.rememberPrDestinations ? pairs.map(row => row.target.trim()) : [];
-      if (this.state.rememberPrDestinations) try { localStorage.setItem(`prDestinations:${this.id}`, JSON.stringify(destinations)); } catch { /* sem armazenamento local */ }
+      if (this.state.rememberPrDestinations) this.storePrDestinations(this.id, destinations);
       this.prSourcesVersion++;
       this.set({ jiraIssue: '', prSource: '', prTarget: destinations[0] ?? '', prUrl: '', prRows: emptyPrRows(destinations) });
     }
@@ -312,17 +316,9 @@ export class AppController {
   loadHistory = (ref: string, more = false) => this.action(async () => {
     this.set({ historyRef: ref });
     const commits = await this.api.log(this.id, ref, more ? this.state.history.length : 0);
-    this.set({ history: more ? [...this.state.history, ...commits] : commits, detail: undefined, selectedCommit: '' });
+    this.set({ history: more ? [...this.state.history, ...commits] : commits });
   });
-  showCommit = (hash: string) => this.action(async () => {
-    this.set({ detail: undefined, selectedCommit: hash, selectedCommitFile: '' });
-    this.set({ detail: await this.api.detail(this.id, hash) });
-  }, false, 'Carregando alterações do commit...');
-  showCommitFile = (file: string) => this.action(async () => {
-    const diff = await this.api.commitFileDiff(this.id, this.state.selectedCommit, file);
-    if (this.state.detail) this.set({ detail: { ...this.state.detail, diff }, selectedCommitFile: file });
-  }, false, 'Carregando alterações do arquivo...');
-  setSource = (source: string) => { this.set({ source, sourceCommits: [], selectedCommits: [], review: false, detail: undefined }); };
+  setSource = (source: string) => { this.set({ source, sourceCommits: [], selectedCommits: [], review: false }); };
   loadSource = (more = false) => this.action(async () => {
     const commits = await this.api.log(this.id, this.state.source, more ? this.state.sourceCommits.length : 0);
     this.set({ sourceCommits: more ? [...this.state.sourceCommits, ...commits] : commits, ...(more ? {} : { selectedCommits: [] }), review: false });
@@ -346,61 +342,18 @@ export class AppController {
     const result = await this.api.resume(this.id, execution.id, action);
     this.set({ manualConfirmed: false, notice: result.finished ? 'Sequência concluída e enviada.' : 'Confira o estado da sequência.' });
   }, true);
-  // Marca/desmarca na hora; o git add/restore roda numa fila em segundo plano e o status real é sincronizado no fim.
-  stage = (paths: string[], unstage = false) => {
-    const status = this.state.status; if (!status || !paths.length) return this.stageQueue;
-    const selected = new Set(paths);
-    this.set({ status: { ...status, files: status.files.map(f => selected.has(f.path) ? optimistic(f, unstage) : f) }, error: '' });
-    const id = this.id; this.pendingStages++;
-    this.stageQueue = this.stageQueue
-      .then(() => this.api.stage(id, paths, unstage))
-      .catch(error => { if (this.repository?.id === id) this.set({ error: (error as Error).message }); })
-      .finally(async () => { if (--this.pendingStages === 0) await this.syncStatus(id, paths); });
-    return this.stageQueue;
-  };
-  private async syncStatus(id: string, touched: string[]) {
-    try {
-      const status = await this.api.status(id);
-      if (this.pendingStages || this.repository?.id !== id) return;
-      this.set({ status });
-      const file = status.files.find(f => f.path === this.state.workingFile);
-      if (file && touched.includes(file.path)) {
-        const staged = this.state.workingStaged && file.index !== ' ' && file.index !== '?' || file.worktree === ' ' && file.index !== ' ' && file.index !== '?';
-        this.set({ workingDiff: await this.api.workingDiff(id, file.path, staged), workingStaged: staged });
-      }
-      else if (!file && this.state.workingFile) this.set({ workingFile: '', workingDiff: '' });
-    } catch (error) { if (this.repository?.id === id) this.set({ error: (error as Error).message }); }
-  }
-  discard = (files: string[]) => this.action(async () => {
-    await this.stageQueue;
-    await this.api.discard(this.id, files);
-    this.set({ notice: files.length === 1 ? 'Alterações descartadas.' : `Alterações de ${files.length} arquivos descartadas.`, ...(files.includes(this.state.workingFile) ? { workingFile: '', workingDiff: '' } : {}) });
-  }, true, 'Descartando alterações…');
   cancelOperation = () => this.action(async () => { await this.api.cancelOperation(this.id); this.set({ notice: 'Operação Git cancelada.' }); }, true, 'Cancelando operação…');
-  showWorkingDiff = (file: string, staged: boolean) => this.action(async () => { this.set({ workingDiff: await this.api.workingDiff(this.id, file, staged), workingFile: file, workingStaged: staged }); });
-  editBlocks = (selections: { hunk: number; block: number }[], action: 'stage' | 'unstage' | 'discard') => this.action(async () => {
-    await this.stageQueue;
-    const id = this.id, { workingFile: file, workingStaged: staged, workingDiff: diff } = this.state;
-    await this.api.editBlocks(id, file, staged, selections, action, diff);
-    const status = await this.api.status(id);
-    const change = status.files.find(f => f.path === file);
-    const hasStaged = !!change && change.index !== ' ' && change.index !== '?';
-    const nextStaged = staged ? hasStaged : !!change && change.worktree === ' ' && hasStaged;
-    this.set({ status, workingStaged: nextStaged, workingDiff: change ? await this.api.workingDiff(id, file, nextStaged) : '', workingFile: change ? file : '', notice: action === 'discard' ? `${selections.length} ${selections.length === 1 ? 'mudança descartada' : 'mudanças descartadas'} do arquivo.` : '' });
-  }, false, action === 'discard' ? 'Descartando mudanças…' : 'Atualizando seleção…');
-  prepareCommit = () => this.action(async () => {
-    await this.stageQueue;
-    const review = await this.api.prepareCommit(this.id);
-    this.set({ commitReview: review, commitReviewMessage: this.state.commitMessage });
-  }, false, 'Preparando revisão final…');
-  cancelCommitReview = () => this.set({ commitReview: undefined, commitReviewMessage: undefined });
-  commit = () => this.action(async () => {
-    await this.stageQueue;
-    const review = this.state.commitReview, message = this.state.commitReviewMessage;
-    if (!review || !message) throw new Error('Abra a revisão final antes de criar o commit.');
-    this.cancelCommitReview();
-    await this.api.commit(this.id, message, { tree: review.tree, head: review.head });
-    this.set({ commitMessage: '', workingDiff: '', workingFile: '', notice: 'Commit criado. Use Enviar (push) para publicar.' });
-  }, true, 'Criando commit…');
-  push = () => this.action(async () => { await this.stageQueue; await this.api.push(this.id); this.set({ notice: 'Push concluído.' }); }, true);
+  // Abre o TortoiseGit sem travar a tela e bloqueia novos cliques por 5 s, para não abrir várias janelas.
+  openTortoise = async (command: 'commit' | 'log', options?: TortoiseOptions) => {
+    if (this.state.tortoiseLocked || !this.repository) return;
+    this.set({ tortoiseLocked: true, error: '' });
+    setTimeout(() => this.set({ tortoiseLocked: false }), 5000);
+    try { await this.api.openTortoise(this.id, command, options); }
+    catch (error) { this.set({ error: (error as Error).message, tortoiseLocked: false }); }
+  };
+  copyBranchName = () => this.action(async () => {
+    const branch = this.state.status?.branch; if (!branch) return;
+    await this.api.copyText(branch); this.set({ notice: `Nome do ramo copiado: ${branch}` });
+  });
+  push = () => this.action(async () => { await this.api.push(this.id); this.set({ notice: 'Push concluído.' }); }, true);
 }
