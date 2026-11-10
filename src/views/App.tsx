@@ -76,13 +76,20 @@ function CloneDialog({ c, vm, onClose }: Props & { onClose: () => void }) {
   const [suggestedParent, setSuggestedParent] = useState(vm.snapshot.settings.roots[0] ?? '');
   const [suggestedName, setSuggestedName] = useState('');
   const [customPath, setCustomPath] = useState<string | null>(null);
-  const [organization, setOrganization] = useState('');
+  const [organization, setOrganization] = useState(() => { try { return localStorage.getItem('azureOrganizationUrl') ?? ''; } catch { return ''; } });
   const [enterpriseUrl, setEnterpriseUrl] = useState('');
   const [project, setProject] = useState('');
   const [filter, setFilter] = useState('');
   const [repositories, setRepositories] = useState<RemoteRepository[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const updateOrganization = (value: string) => {
+    setOrganization(value);
+    try {
+      const candidate = new URL(value.trim());
+      if (candidate.protocol === 'https:' && !candidate.username && !candidate.password && !candidate.search && !candidate.hash && (candidate.hostname === 'dev.azure.com' || /^[a-z\d-]+\.visualstudio\.com$/i.test(candidate.hostname))) localStorage.setItem('azureOrganizationUrl', value.trim());
+    } catch { /* guarda apenas endereços HTTPS completos */ }
+  };
   useEffect(() => {
     let active = true;
     void c.defaultCloneFolder().then(value => { if (active) setSuggestedParent(current => current || value); }).catch(cause => { if (active) setError((cause as Error).message); });
@@ -95,7 +102,11 @@ function CloneDialog({ c, vm, onClose }: Props & { onClose: () => void }) {
   const chooseFolder = async () => { try { const selected = await c.chooseCloneFolder(destination?.parent ?? suggestedParent); if (selected) { setSuggestedParent(selected); setCustomPath(customPath === null ? null : `${selected.replace(/[\\/]+$/, '')}\\${destination?.name ?? suggestedName}`); } } catch (cause) { setError((cause as Error).message); } };
   const lookup = async () => {
     setError(''); setLoading(true); setRepositories([]);
-    try { setRepositories(source === 'azure' ? await c.listAzureRepositories(organization, project) : await c.listGitHubRepositories(source as 'github' | 'enterprise', enterpriseUrl)); }
+    try {
+      const found = source === 'azure' ? await c.listAzureRepositories(organization, project) : await c.listGitHubRepositories(source as 'github' | 'enterprise', enterpriseUrl);
+      setRepositories(found);
+      if (source === 'azure') try { localStorage.setItem('azureOrganizationUrl', organization.trim()); } catch { /* armazenamento local indisponível */ }
+    }
     catch (cause) { setError((cause as Error).message); }
     finally { setLoading(false); }
   };
@@ -112,7 +123,7 @@ function CloneDialog({ c, vm, onClose }: Props & { onClose: () => void }) {
     <div className="clone-dialog-heading"><div><h2 id="clone-dialog-title">Clonar repositório</h2><p>Escolha a origem e a pasta onde o projeto será salvo.</p></div><button type="button" className="clone-dialog-close" aria-label="Fechar" onClick={onClose} disabled={vm.busy}>×</button></div>
     <fieldset className="clone-dialog-content" disabled={vm.busy}><div className="clone-body"><div className="clone-sources" role="tablist" aria-label="Origem do repositório">{sources.map(item => <button key={item.id} type="button" role="tab" aria-selected={source === item.id} className={source === item.id ? 'selected' : ''} onClick={() => chooseSource(item.id)}>{item.label}</button>)}</div>
       {(source === 'github' || source === 'enterprise') && <div className="clone-azure">{source === 'enterprise' && <label className="field"><span>Servidor GitHub Enterprise</span><input value={enterpriseUrl} onChange={e => setEnterpriseUrl(e.target.value)} placeholder="https://github.empresa.com"/></label>}<button type="button" onClick={lookup} disabled={loading || source === 'enterprise' && !enterpriseUrl.trim()}>{loading ? 'Buscando…' : 'Listar meus repositórios'}</button>{!loading && !repositories.length && !error && <p className="hint">Use suas credenciais Git para listar repositórios, ou cole a URL abaixo.</p>}</div>}
-      {source === 'azure' && <div className="clone-azure"><div className="clone-grid"><label className="field"><span>Organização Azure</span><input value={organization} onChange={e => setOrganization(e.target.value)} placeholder="https://dev.azure.com/minha-organizacao"/></label><label className="field"><span>Projeto (opcional)</span><input value={project} onChange={e => setProject(e.target.value)} placeholder="Filtrar por projeto"/></label></div><button type="button" onClick={lookup} disabled={loading || !organization.trim()}>{loading ? 'Buscando…' : 'Listar repositórios'}</button>{!!repositories.length && <><label className="field"><span>Filtrar repositórios</span><input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Nome do repositório ou projeto"/></label><div className="clone-results">{repositories.filter(repo => `${repo.name} ${repo.project}`.toLocaleLowerCase().includes(filter.toLocaleLowerCase())).map(repo => <button type="button" key={repo.cloneUrl} onClick={() => selectRemote(repo)} className={url === repo.cloneUrl ? 'selected' : ''}><strong>{repo.name}</strong><small>{repo.project}</small></button>)}</div></>}{!loading && organization && !repositories.length && !error && <p className="hint">Nenhum repositório listado. Confira a organização, o projeto e suas credenciais Git.</p>}</div>}
+      {source === 'azure' && <div className="clone-azure"><div className="clone-grid"><label className="field"><span>Organização Azure</span><input value={organization} onChange={e => updateOrganization(e.target.value)} placeholder="https://totvstfs.visualstudio.com/Linha-Winthor"/></label><label className="field"><span>Projeto (opcional)</span><input value={project} onChange={e => setProject(e.target.value)} placeholder="Filtrar por projeto"/></label></div><button type="button" onClick={lookup} disabled={loading || !organization.trim()}>{loading ? 'Buscando…' : 'Listar repositórios'}</button>{!!repositories.length && <><label className="field"><span>Filtrar repositórios</span><input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Nome do repositório ou projeto"/></label><div className="clone-results">{repositories.filter(repo => `${repo.name} ${repo.project}`.toLocaleLowerCase().includes(filter.toLocaleLowerCase())).map(repo => <button type="button" key={repo.cloneUrl} onClick={() => selectRemote(repo)} className={url === repo.cloneUrl ? 'selected' : ''}><strong>{repo.name}</strong><small>{repo.project}</small></button>)}</div></>}{!loading && organization && !repositories.length && !error && <p className="hint">Nenhum repositório listado. Confira a organização, o projeto e suas credenciais Git.</p>}</div>}
       {(source === 'github' || source === 'enterprise') && !!repositories.length && <div className="clone-azure"><label className="field"><span>Filtrar repositórios</span><input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Nome ou proprietário"/></label><div className="clone-results">{repositories.filter(repo => `${repo.name} ${repo.project}`.toLocaleLowerCase().includes(filter.toLocaleLowerCase())).map(repo => <button type="button" key={repo.cloneUrl} onClick={() => selectRemote(repo)} className={url === repo.cloneUrl ? 'selected' : ''}><strong>{repo.name}</strong></button>)}</div></div>}
       <form onSubmit={submit}>
         <label className="field"><span>URL do repositório</span><input type="text" value={url} onChange={e => { const value = e.target.value; setUrl(value); setSuggestedName(value.replace(/\/$/, '').split(/[/:]/).pop()?.replace(/\.git$/, '') ?? ''); }} required placeholder={source === 'github' ? 'https://github.com/usuario/repositorio.git' : source === 'enterprise' ? 'https://github.empresa.com/equipe/repositorio.git' : source === 'azure' ? 'Selecione um repositório acima ou cole a URL' : 'https://servidor/equipe/repositorio.git'}/></label>
@@ -216,8 +227,7 @@ function PullRequest({ c, vm }: Props) {
     </dialog>
     <div className="summary"><span>Azure Repos <strong>{info.webUrl.replace(/^https?:\/\//, '')}</strong></span></div>
     <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
-    <label className="manual-check dynamic-toggle"><input type="checkbox" checked={vm.dynamicPr} onChange={e => c.set({ dynamicPr: e.target.checked })}/>PR dinâmico <small>(até 4 de uma vez)</small></label>
-    <div className="pr-preferences"><label className="manual-check"><input type="checkbox" checked={vm.rememberPrDestinations} onChange={e => c.setRememberPrDestinations(e.target.checked)}/>Lembrar destino</label><button type="button" className="quiet" onClick={c.clearPrSources}>Limpar origens</button><button type="button" className="quiet" onClick={c.clearPrTargets}>Limpar destinos</button></div>
+    <div className="pr-toolbar"><div className="pr-toggles"><label className="manual-check dynamic-toggle"><input type="checkbox" checked={vm.dynamicPr} onChange={e => c.set({ dynamicPr: e.target.checked })}/>PR dinâmico <small>(até 4 de uma vez)</small></label><label className="manual-check"><input type="checkbox" checked={vm.rememberPrDestinations} onChange={e => c.setRememberPrDestinations(e.target.checked)}/>Lembrar destino</label></div><div className="pr-preferences"><button type="button" className="quiet" onClick={c.clearPrSources}>Limpar origens</button><button type="button" className="quiet" onClick={c.clearPrTargets}>Limpar destinos</button></div></div>
     {vm.dynamicPr ? <div className="batch">
       {vm.prRows.map((row, index) => <div className="batch-row pr-row" key={index}>
         <span className="step-number">{index + 1}</span>
