@@ -113,6 +113,7 @@ describe('AppController', () => {
       await c.openTortoise('log', { rev: 'abc' }); await c.openTortoise('log', { rev: 'def' });
       expect(openTortoise).toHaveBeenCalledTimes(1);
       expect(c.getSnapshot().tortoiseLocked).toBe(true);
+      expect(c.getSnapshot().tortoiseOpened).toBe(true);
       vi.advanceTimersByTime(5000);
       expect(c.getSnapshot().tortoiseLocked).toBe(false);
       await c.openTortoise('commit');

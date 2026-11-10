@@ -5,7 +5,7 @@ export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects'
 export interface ViewModel {
   snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
   switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[];
-  tortoiseLocked: boolean;
+  tortoiseLocked: boolean; tortoiseOpened: boolean;
   source: string; sourceCommits: Commit[]; selectedCommits: string[]; targets: string[]; review: boolean;
   progress: Progress[];
   manualConfirmed: boolean; loadingRepository: boolean;
@@ -27,7 +27,7 @@ export class AppController {
   private prSourcesVersion = 0;
   private state: ViewModel = {
     snapshot: { settings: { roots: [] }, repositories: [], executions: [] }, tab: 'switch', busy: false, busyMessage: '', error: '', notice: '', branches: [],
-    switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
+    switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, tortoiseOpened: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
     progress: [], manualConfirmed: false, loadingRepository: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
     dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false,
@@ -346,10 +346,10 @@ export class AppController {
   // Abre o TortoiseGit sem travar a tela e bloqueia novos cliques por 5 s, para não abrir várias janelas.
   openTortoise = async (command: 'commit' | 'log', options?: TortoiseOptions) => {
     if (this.state.tortoiseLocked || !this.repository) return;
-    this.set({ tortoiseLocked: true, error: '' });
-    setTimeout(() => this.set({ tortoiseLocked: false }), 5000);
-    try { await this.api.openTortoise(this.id, command, options); }
-    catch (error) { this.set({ error: (error as Error).message, tortoiseLocked: false }); }
+    this.set({ tortoiseLocked: true, tortoiseOpened: false, error: '' });
+    setTimeout(() => this.set({ tortoiseLocked: false, tortoiseOpened: false }), 5000);
+    try { await this.api.openTortoise(this.id, command, options); this.set({ tortoiseOpened: true }); }
+    catch (error) { this.set({ error: (error as Error).message, tortoiseLocked: false, tortoiseOpened: false }); }
   };
   copyBranchName = () => this.action(async () => {
     const branch = this.state.status?.branch; if (!branch) return;
