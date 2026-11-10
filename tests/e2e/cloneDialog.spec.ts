@@ -30,11 +30,14 @@ test('clonagem abre em modal a partir de Seus projetos', async () => {
   await expect(dialog.getByText('Pasta do clone', { exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: 'Escolher pasta…' })).toBeVisible();
   await dialog.getByRole('tab', { name: 'Azure Repos' }).click();
-  await expect(dialog.getByPlaceholder('https://dev.azure.com/minha-organizacao')).toBeVisible();
+  const azureOrganization = dialog.getByPlaceholder('https://totvstfs.visualstudio.com/Linha-Winthor');
+  await azureOrganization.fill('https://totvstfs.visualstudio.com/Linha-Winthor');
   await dialog.getByRole('button', { name: 'Cancelar' }).click();
   await expect(dialog).toHaveCount(0);
   await open.click();
   await expect(dialog).toBeVisible();
+  await dialog.getByRole('tab', { name: 'Azure Repos' }).click();
+  await expect(azureOrganization).toHaveValue('https://totvstfs.visualstudio.com/Linha-Winthor');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });

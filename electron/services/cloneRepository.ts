@@ -40,10 +40,17 @@ export async function cloneRepository(source: CloneSource, remote: string, paren
 export async function listAzureRepositories(organizationUrl: string, project: string): Promise<RemoteRepository[]> {
   let base: URL;
   try { base = new URL(organizationUrl.trim()); } catch { throw new Error('Informe a URL da organização no Azure DevOps.'); }
-  if (base.protocol !== 'https:' || base.hostname !== 'dev.azure.com' || !/^\/[\w.-]+\/?$/.test(base.pathname) || base.username || base.password || base.search || base.hash) throw new Error('Use uma URL como https://dev.azure.com/sua-organizacao.');
+  const modern = base.hostname === 'dev.azure.com';
+  const legacy = /^[a-z\d-]+\.visualstudio\.com$/i.test(base.hostname);
+  const segments = base.pathname.split('/').filter(Boolean);
+  const validPath = modern ? segments.length >= 1 && segments.length <= 2 : legacy && segments.length <= 2 && (segments.length < 2 || segments[0].toLowerCase() === 'defaultcollection');
+  if (base.protocol !== 'https:' || !validPath || base.username || base.password || base.search || base.hash || segments.some(segment => !/^[\w.%-]+$/.test(segment))) throw new Error('Use a URL da organização, como https://dev.azure.com/sua-organizacao ou https://sua-organizacao.visualstudio.com/Projeto.');
   const projectName = project.trim();
   if (projectName.length > 100 || /[\x00-\x1f/?#]/.test(projectName)) throw new Error('Informe um projeto Azure válido.');
-  const endpoint = new URL(`${base.origin}${base.pathname.replace(/\/$/, '')}/${projectName ? `${encodeURIComponent(projectName)}/` : ''}_apis/git/repositories?api-version=7.1`);
+  const organizationPath = modern ? `/${segments[0]}` : segments[0]?.toLowerCase() === 'defaultcollection' ? `/${segments[0]}` : '';
+  const impliedProject = modern ? segments[1] : segments[0]?.toLowerCase() === 'defaultcollection' ? segments[1] : segments[0];
+  const encodedProject = projectName ? encodeURIComponent(projectName) : impliedProject ?? '';
+  const endpoint = new URL(`${base.origin}${organizationPath}/${encodedProject ? `${encodedProject}/` : ''}_apis/git/repositories?api-version=7.1`);
   const authorization = await gitAuthorization(process.cwd(), base.href).catch(() => { throw new Error('Não foi possível autenticar no Azure. Configure o acesso HTTPS pelo Git Credential Manager.'); });
   const response = await fetch(endpoint, { headers: { Authorization: authorization, Accept: 'application/json' }, signal: AbortSignal.timeout(30000) });
   if (!response.ok) throw new Error(`Não foi possível listar os repositórios do Azure (HTTP ${response.status}).`);

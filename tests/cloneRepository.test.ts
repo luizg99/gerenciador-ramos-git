@@ -41,6 +41,14 @@ describe('Clonagem de repositórios', () => {
     await expect(listAzureRepositories('https://other.example/org', '')).rejects.toThrow('dev.azure.com');
   });
 
+  it('aceita a URL visualstudio.com com o projeto no caminho', async () => {
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, json: async () => ({ value: [{ name: 'VA41-PCSIS4139', remoteUrl: 'https://totvstfs.visualstudio.com/Linha-Winthor/_git/VA41-PCSIS4139', project: { name: 'Linha-Winthor' } }] }) } as Response);
+    const repos = await listAzureRepositories('https://totvstfs.visualstudio.com/Linha-Winthor', '');
+    expect(repos[0].name).toBe('VA41-PCSIS4139');
+    expect(String(request.mock.calls[0][0])).toBe('https://totvstfs.visualstudio.com/Linha-Winthor/_apis/git/repositories?api-version=7.1');
+    request.mockRestore();
+  });
+
   it('lista repositórios autenticados no GitHub.com e Enterprise', async () => {
     const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [{ full_name: 'equipe/repo', name: 'repo', clone_url: 'https://github.com/equipe/repo.git', owner: { login: 'equipe' } }] } as Response);
     expect((await listGitHubRepositories('github')).map(repo => repo.name)).toEqual(['equipe/repo']);
