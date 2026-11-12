@@ -1,11 +1,14 @@
 import { app, BrowserWindow, Notification, dialog } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { autoUpdater } from 'electron-updater';
+import type { AppUpdater } from 'electron-updater';
 
 // Atualização obrigatória, iniciada pelo cliente: o app abre normalmente e, havendo versão nova nas Releases do GitHub, mostra um aviso
 // que bloqueia a janela até clicar em "Atualizar agora". Só então baixa (com barra de progresso), instala e reabre sozinho.
 // Só vale para o app instalado: em desenvolvimento e nos testes não faz nada. Sem internet, a checagem falha em silêncio e o app segue normal.
+// O electron-updater é pesado de carregar (até ~1 s na primeira abertura do dia); por isso só é carregado depois que a janela já está pronta.
+let autoUpdater: AppUpdater | undefined;
+const loadUpdater = async () => (autoUpdater ??= (require('electron-updater') as typeof import('electron-updater')).autoUpdater);
 const enabled = () => app.isPackaged && !process.env.RAMOS_TEST_DATA;
 const CHECK_TIMEOUT_MS = 10_000;
 const marker = () => path.join(app.getPath('userData'), 'atualizacao-pendente.json');
@@ -20,7 +23,7 @@ const page = (title: string, detail: string) => 'data:text/html;charset=utf-8,' 
 function installAndRestart(version: string) {
   try { fs.writeFileSync(marker(), JSON.stringify({ version })); } catch { /* sem marcador, só não haverá o aviso final */ }
   notify('Instalando a atualização', `Versão ${version}. O aplicativo vai reabrir sozinho em instantes.`);
-  autoUpdater.quitAndInstall(true, true);
+  autoUpdater!.quitAndInstall(true, true);
 }
 function announceInstalledUpdate() {
   try {
@@ -38,9 +41,9 @@ async function downloadAndInstall(parent: BrowserWindow | null, version: string)
   await progress.loadURL(page(`Atualizando para a versão ${version}`, 'Baixando a atualização…'));
   progress.show();
   const show = (percent: number, text: string) => { if (!progress.isDestroyed()) void progress.webContents.executeJavaScript(`document.getElementById('b').style.width='${percent}%';document.getElementById('d').textContent=${JSON.stringify(text)}`).catch(() => {}); };
-  autoUpdater.on('download-progress', p => show(Math.round(p.percent), `Baixando a atualização… ${Math.round(p.percent)}%`));
+  autoUpdater!.on('download-progress', p => show(Math.round(p.percent), `Baixando a atualização… ${Math.round(p.percent)}%`));
   for (;;) {
-    try { await autoUpdater.downloadUpdate(); break; }
+    try { await autoUpdater!.downloadUpdate(); break; }
     catch (error) {
       const choice = await dialog.showMessageBox(progress, { type: 'error', buttons: ['Tentar novamente', 'Sair'], defaultId: 0, cancelId: 1, message: 'Não foi possível baixar a atualização.', detail: `É preciso atualizar para continuar usando o aplicativo.\n${(error as Error).message.slice(0, 200)}` });
       if (choice.response === 1) { progress.removeAllListeners('closed'); app.quit(); return; }
@@ -57,15 +60,15 @@ async function downloadAndInstall(parent: BrowserWindow | null, version: string)
 export function watchForUpdates(getWindow: () => BrowserWindow | null, isBusy: () => boolean) {
   if (!enabled()) return;
   announceInstalledUpdate();
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.on('error', () => {});
   let prompting = false;
   const check = async () => {
     if (prompting) return;
     let version = '';
     try {
-      const result = await Promise.race([autoUpdater.checkForUpdates(), wait(CHECK_TIMEOUT_MS).then(() => null)]);
+      const fresh = !autoUpdater;
+      const updater = await loadUpdater();
+      if (fresh) { updater.autoDownload = false; updater.autoInstallOnAppQuit = false; updater.on('error', () => {}); }
+      const result = await Promise.race([updater.checkForUpdates(), wait(CHECK_TIMEOUT_MS).then(() => null)]);
       if (!result?.isUpdateAvailable) return;
       version = result.updateInfo.version;
     } catch { return; }
@@ -76,6 +79,6 @@ export function watchForUpdates(getWindow: () => BrowserWindow | null, isBusy: (
     if (window && !window.isDestroyed()) await dialog.showMessageBox(window, options); else await dialog.showMessageBox(options);
     await downloadAndInstall(getWindow(), version);
   };
-  setTimeout(() => void check(), 1500);
+  setTimeout(() => void check(), 5000);
   setInterval(() => void check(), 6 * 60 * 60 * 1000);
 }
