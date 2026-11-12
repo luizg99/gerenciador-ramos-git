@@ -17,6 +17,7 @@ import { isAllowedJiraPath } from '../src/models/jira';
 import { JiraBrowser } from './services/jiraBrowser';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 import { openTortoise } from './services/tortoiseGit';
+import { enforceUpdateOnStartup, watchForUpdates } from './services/autoUpdate';
 let gemini: GeminiBrowser;
 let jira: JiraBrowser;
 let window: BrowserWindow | null = null;
@@ -160,6 +161,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { window?.restore(); window?.focus(); });
   app.whenReady().then(async () => {
+    await enforceUpdateOnStartup();
     const report = (repoPath: string, message: string) => { if (window && !window.isDestroyed()) window.webContents.send('operation:progress', { repoPath, message: redact(message), time: new Date().toISOString() }); };
     const changed = (snapshot: Snapshot) => { if (window && !window.isDestroyed()) window.webContents.send('app:changed', snapshot); };
     const git = new GitService(report);
@@ -175,7 +177,7 @@ else {
     };
     controller = new ApplicationController(git, new Storage(app.getPath('userData')), report, changed);
     // A janela abre já; as chamadas IPC aguardam só a leitura das configurações e da lista salva.
-    ready = controller.initialize().then(() => applyTheme()); registerIpc(); await createWindow(); await ready;
+    ready = controller.initialize().then(() => applyTheme()); registerIpc(); await createWindow(); watchForUpdates(() => window, () => controller.busy); await ready;
   }).catch(error => { dialog.showErrorBox('Falha ao iniciar', (error as Error).message); app.quit(); });
   // Ao fechar a última janela, grava os cookies de login (Gemini e Jira) em disco, para não pedir login de novo na próxima abertura.
   app.on('window-all-closed', () => {

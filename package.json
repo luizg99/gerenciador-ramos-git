@@ -1,6 +1,6 @@
 {
   "name": "gerenciador-de-ramos",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "private": true,
   "description": "Gerenciador de ramos Git para Windows",
   "author": "Gerenciador de Ramos",
@@ -16,6 +16,7 @@
     "dist:installer": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "^3.24.0"
@@ -34,8 +35,13 @@
     "vitest": "^3.2.0"
   },
   "build": {
-    "buildVersion": "0.1.21.0",
+    "buildVersion": "0.1.22.0",
     "appId": "br.com.gerenciadorderamos.app",
+    "publish": {
+      "provider": "github",
+      "owner": "luizg99",
+      "repo": "gerenciador-ramos-git"
+    },
     "productName": "Gerenciador de Ramos",
     "directories": {
       "output": "release"

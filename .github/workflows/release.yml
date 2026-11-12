@@ -1,0 +1,31 @@
+name: Release
+
+# Para publicar uma versão: atualize "version" no package.json, faça o commit e rode
+#   git tag v0.1.22 && git push origin v0.1.22
+# O instalador e o latest.yml são publicados na Release, e os apps instalados se atualizam sozinhos.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Conferir se a tag bate com a versão do package.json
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if [ "v$v" != "${GITHUB_REF_NAME}" ]; then echo "Tag ${GITHUB_REF_NAME} diferente da versão v$v do package.json"; exit 1; fi
+      - run: npm ci
+      - name: Gerar e publicar o instalador
+        run: npm run dist:installer -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
