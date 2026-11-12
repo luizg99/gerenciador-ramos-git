@@ -17,7 +17,7 @@ import { isAllowedJiraPath } from '../src/models/jira';
 import { JiraBrowser } from './services/jiraBrowser';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 import { openTortoise } from './services/tortoiseGit';
-import { enforceUpdateOnStartup, watchForUpdates } from './services/autoUpdate';
+import { watchForUpdates } from './services/autoUpdate';
 let gemini: GeminiBrowser;
 let jira: JiraBrowser;
 let window: BrowserWindow | null = null;
@@ -161,7 +161,6 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { window?.restore(); window?.focus(); });
   app.whenReady().then(async () => {
-    await enforceUpdateOnStartup();
     const report = (repoPath: string, message: string) => { if (window && !window.isDestroyed()) window.webContents.send('operation:progress', { repoPath, message: redact(message), time: new Date().toISOString() }); };
     const changed = (snapshot: Snapshot) => { if (window && !window.isDestroyed()) window.webContents.send('app:changed', snapshot); };
     const git = new GitService(report);
