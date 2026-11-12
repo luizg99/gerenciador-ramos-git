@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppController, type Tab, type ViewModel } from '../controllers/appController';
-import type { CloneSource, RemoteRepository } from '../models/domain';
+import type { CloneSource, Progress, RemoteRepository } from '../models/domain';
 import { ref } from '../models/validation';
 import { greeting, parseJiraIssue, prLabel, type ReviewMessage } from '../models/reviewMessage';
 import { Gemini } from './Gemini';
@@ -20,18 +20,20 @@ function crumbs(repoPath: string, roots: string[]) {
   return root ? parts.slice(Math.max(root.length - 1, 0)) : parts.slice(-1);
 }
 const statusLabels: Record<string, string> = { M: 'Modificado', A: 'Adicionado', D: 'Excluído', R: 'Renomeado', C: 'Copiado', U: 'Em conflito', N: 'Novo (não rastreado)', T: 'Tipo alterado' };
+// Fica fora do App e memoizado: o log (até 200 linhas) só é redesenhado quando chega um evento novo, e não a cada tecla digitada.
+const ActivityLog = memo(function ActivityLog({ progress, busy }: { progress: Progress[]; busy: boolean }) {
+  const logRef = useRef<HTMLDivElement>(null);
+  const scrollToBottom = () => { const log = logRef.current; if (log) log.scrollTop = log.scrollHeight; };
+  useLayoutEffect(scrollToBottom, [progress, busy]);
+  if (!progress.length) return null;
+  return <details className="operation-log" open={busy} onToggle={e => { if (e.currentTarget.open) scrollToBottom(); }}><summary>Atividade da sessão <em>{progress[progress.length - 1]?.message}</em><span>{progress.length} eventos</span></summary><div ref={logRef}>{progress.map((p, i) => <p key={i}><time>{new Date(p.time).toLocaleTimeString('pt-BR')}</time>{p.message}</p>)}</div></details>;
+});
 export function App({ controller: c }: { controller: AppController }) {
   const vm = useSyncExternalStore(c.subscribe, c.getSnapshot);
   const [search, setSearch] = useState('');
   const [cloneOpen, setCloneOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(() => { try { return localStorage.getItem('projectsOpen') !== 'false'; } catch { return true; } });
   const toggleProjects = () => { const open = !projectsOpen; setProjectsOpen(open); try { localStorage.setItem('projectsOpen', String(open)); } catch { /* preferência só desta máquina */ } };
-  const activityLogRef = useRef<HTMLDivElement>(null);
-  const scrollActivityToBottom = () => {
-    const log = activityLogRef.current;
-    if (log) log.scrollTop = log.scrollHeight;
-  };
-  useLayoutEffect(scrollActivityToBottom, [vm.progress, vm.busy]);
   useEffect(() => c.connect(), [c]);
   useLayoutEffect(() => { document.documentElement.dataset.theme = c.theme; }, [c, vm.snapshot.settings.theme]);
   const repo = c.repository;
@@ -53,7 +55,7 @@ export function App({ controller: c }: { controller: AppController }) {
       <div hidden={vm.tab !== 'jira'}><Jira active={vm.tab === 'jira'}/></div><fieldset className="page-content" disabled={vm.busy}>{vm.tab === 'projects' ? <Projects c={c} vm={vm}/> : vm.tab === 'settings' ? <Settings c={c} vm={vm}/> : vm.tab === 'gemini' ? <Gemini/> : vm.tab === 'jira' ? null : !repo ? vm.busy || vm.loadingRepository ? null : <div className="empty"><h2>Selecione um projeto</h2><button onClick={c.chooseRoot}>Adicionar pasta de projetos</button></div> : vm.tab === 'switch' ? <Switch c={c} vm={vm}/> : vm.tab === 'history' ? <History c={c} vm={vm}/> : vm.tab === 'commit' ? <Changes c={c} vm={vm}/> : vm.tab === 'cherry' ? <Cherry c={c} vm={vm}/> : <PullRequest c={c} vm={vm}/>}</fieldset>{vm.tab === 'projects' && cloneOpen && <CloneDialog c={c} vm={vm} onClose={() => setCloneOpen(false)}/>}
       </div></div>
       {vm.tortoiseLocked && <div className={`tortoise-toast ${vm.tortoiseOpened ? 'opened' : ''}`} role="status">{vm.tortoiseOpened ? <><span aria-hidden="true">✓</span>TortoiseGit aberto</> : <><span className="spinner"/>Abrindo o TortoiseGit, aguarde…</>}</div>}
-      {!!vm.progress.length && <details className="operation-log" open={vm.busy} onToggle={e => { if (e.currentTarget.open) scrollActivityToBottom(); }}><summary>Atividade da sessão <em>{vm.progress[vm.progress.length - 1]?.message}</em><span>{vm.progress.length} eventos</span></summary><div ref={activityLogRef}>{vm.progress.map((p, i) => <p key={i}><time>{new Date(p.time).toLocaleTimeString('pt-BR')}</time>{p.message}</p>)}</div></details>}
+      <ActivityLog progress={vm.progress} busy={vm.busy}/>
       <footer className="main-footer"><span>{repo?.path ?? 'Nenhum projeto selecionado'}</span><span>{vm.busy ? 'Operação em andamento' : 'Pronto'}</span></footer>
     </main>
   </div>;
@@ -323,8 +325,8 @@ function Settings({ c, vm }: Props) {
 function History({ c, vm }: Props) {
   const open = (rev: string) => c.openTortoise('log', { ref: vm.historyRef, rev });
   return <section className="card"><div className="toolbar"><BranchPicker label="Histórico do ramo" value={vm.historyRef} branches={vm.branches} onChange={historyRef => c.set({ historyRef })}/><button onClick={() => c.loadHistory(vm.historyRef)}>Carregar histórico</button><button disabled={vm.tortoiseLocked} onClick={() => c.openTortoise('log', { ref: vm.historyRef })} title="Abre o Show log do TortoiseGit no ramo escolhido">Abrir Show log (TortoiseGit)</button></div>
-    <p className="hint padded">Clique em um commit para ver o que mudou nele no TortoiseGit.</p>
-    <CommitList commits={vm.history} onInspect={open} inspectTitle="Abrir este commit no TortoiseGit" inspectDisabled={vm.tortoiseLocked}/>{!!vm.history.length && <button className="load-more" onClick={() => c.loadHistory(vm.historyRef, true)}>Carregar mais commits</button>}</section>;
+    <p className="hint padded">{vm.loadingHistory ? 'Carregando commits…' : 'Clique em um commit para ver o que mudou nele no TortoiseGit.'}</p>
+    <CommitList commits={vm.history} onInspect={open} inspectTitle="Abrir este commit no TortoiseGit" inspectDisabled={vm.tortoiseLocked}/>{!!vm.history.length && <button className="load-more" disabled={vm.loadingHistory} onClick={() => c.loadHistory(vm.historyRef, true)}>Carregar mais commits</button>}</section>;
 }
 const statusCode = (f: { index: string; worktree: string }) => f.index === '?' ? 'N' : f.index !== ' ' ? f.index : f.worktree;
 function Changes({ c, vm }: Props) {

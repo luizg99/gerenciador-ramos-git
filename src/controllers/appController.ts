@@ -8,7 +8,7 @@ export interface ViewModel {
   tortoiseLocked: boolean; tortoiseOpened: boolean;
   source: string; sourceCommits: Commit[]; selectedCommits: string[]; targets: string[]; review: boolean;
   progress: Progress[];
-  manualConfirmed: boolean; loadingRepository: boolean;
+  manualConfirmed: boolean; loadingRepository: boolean; loadingHistory: boolean;
   createBase: string; publishNew: boolean; installOnSwitch: boolean; prInfo?: PullRequestInfo; prSource: string; prTarget: string;
   dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; rememberPrDestinations: boolean;
   jiraIssue: string; prUrl: string; reviewMessages: ReviewMessage[]; reviewSearch: string; generatedReview?: ReviewMessage;
@@ -28,7 +28,7 @@ export class AppController {
   private state: ViewModel = {
     snapshot: { settings: { roots: [] }, repositories: [], executions: [] }, tab: 'switch', busy: false, busyMessage: '', error: '', notice: '', branches: [],
     switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, tortoiseOpened: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
-    progress: [], manualConfirmed: false, loadingRepository: false,
+    progress: [], manualConfirmed: false, loadingRepository: false, loadingHistory: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
     dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false,
     jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: ''
@@ -70,9 +70,10 @@ export class AppController {
       }
     });
     const unsubscribeSnapshot = this.api.onSnapshot(snapshot => this.applySnapshot(snapshot));
-    // Detecta alterações feitas fora do app (editor, TortoiseGit): a cada 1 s na aba de commit, a cada 5 s nas outras e ao voltar o foco.
+    // Detecta alterações feitas fora do app (editor, TortoiseGit): a cada 2 s na aba de commit, a cada 15 s nas outras e ao voltar o foco.
+    // Cada consulta dispara vários processos do Git (caro no Windows); por isso o intervalo não é menor, e a janela minimizada não consulta.
     let tick = 0;
-    const timer = setInterval(() => { tick++; if (this.state.tab === 'commit' || tick % 5 === 0) void this.pollStatus(); }, 1000);
+    const timer = setInterval(() => { tick++; if ((this.state.tab === 'commit' && tick % 2 === 0 || tick % 15 === 0)) void this.pollStatus(); }, 1000);
     const onFocus = () => { void this.pollStatus(); };
     const hasWindow = typeof window !== 'undefined';
     if (hasWindow) window.addEventListener('focus', onFocus);
@@ -313,11 +314,18 @@ export class AppController {
     this.set({ reviewMessages: await this.api.reviewHistory() });
   }, false, 'Criando PRs com as mensagens dos commits…');
   runPman = () => this.action(async () => { await this.api.runPman(this.id); this.set({ notice: 'Dependências instaladas.' }); }, true);
-  loadHistory = (ref: string, more = false) => this.action(async () => {
-    this.set({ historyRef: ref });
-    const commits = await this.api.log(this.id, ref, more ? this.state.history.length : 0);
-    this.set({ history: more ? [...this.state.history, ...commits] : commits });
-  });
+  // Não trava a tela: ao entrar na aba Histórico o menu continua clicável enquanto o Git lê os commits.
+  private historyToken = 0;
+  loadHistory = async (ref: string, more = false) => {
+    const token = ++this.historyToken;
+    this.set({ historyRef: ref, loadingHistory: true, error: '' });
+    try {
+      const id = this.id;
+      const commits = await this.api.log(id, ref, more ? this.state.history.length : 0);
+      if (token === this.historyToken && this.repository?.id === id) this.set({ history: more ? [...this.state.history, ...commits] : commits });
+    } catch (error) { if (token === this.historyToken) this.set({ error: (error as Error).message }); }
+    finally { if (token === this.historyToken) this.set({ loadingHistory: false }); }
+  };
   setSource = (source: string) => { this.set({ source, sourceCommits: [], selectedCommits: [], review: false }); };
   loadSource = (more = false) => this.action(async () => {
     const commits = await this.api.log(this.id, this.state.source, more ? this.state.sourceCommits.length : 0);

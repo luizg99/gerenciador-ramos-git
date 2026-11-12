@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { JiraBounds, JiraBrowserState, JiraCurrentUser, JiraFieldMeta, JiraIssue, JiraMethod, JiraTransition, JiraWorklog } from '../models/jira';
 import { greeting } from '../models/reviewMessage';
 import { RichPaste } from './RichPaste';
@@ -27,10 +27,11 @@ const withDate = (dateValue: string, dateTimeValue: string) => {
 };
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('pt-BR') : '';
 
-export function Jira({ active = true }: { active?: boolean }) {
+// memo: a tela do Jira fica sempre montada; sem isso, cada tecla digitada em outra aba a redesenhava inteira.
+export const Jira = memo(function Jira({ active = true }: { active?: boolean }) {
   const [generation, setGeneration] = useState(0);
   return <JiraForm key={generation} active={active} clear={() => setGeneration(value => value + 1)}/>;
-}
+});
 function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [key, setKey] = useState('');
