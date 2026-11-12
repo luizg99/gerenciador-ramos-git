@@ -25,6 +25,11 @@ jobs:
           v=$(node -p "require('./package.json').version")
           if [ "v$v" != "${GITHUB_REF_NAME}" ]; then echo "Tag ${GITHUB_REF_NAME} diferente da versão v$v do package.json"; exit 1; fi
       - run: npm ci
+      - name: Criar a Release (antes do upload, para os arquivos não gerarem duas Releases)
+        shell: bash
+        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME#v}" --notes "Versão ${GITHUB_REF_NAME#v}" --verify-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Gerar e publicar o instalador
         run: npm run dist:installer -- --publish always
         env:
