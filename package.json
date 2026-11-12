@@ -40,7 +40,8 @@
     "publish": {
       "provider": "github",
       "owner": "luizg99",
-      "repo": "gerenciador-ramos-git"
+      "repo": "gerenciador-ramos-git",
+      "releaseType": "release"
     },
     "productName": "Gerenciador de Ramos",
     "directories": {
