@@ -9,15 +9,23 @@ import type { AppUpdater } from 'electron-updater';
 // O electron-updater é pesado de carregar (até ~1 s na primeira abertura do dia); por isso só é carregado depois que a janela já está pronta.
 let autoUpdater: AppUpdater | undefined;
 const loadUpdater = async () => (autoUpdater ??= (require('electron-updater') as typeof import('electron-updater')).autoUpdater);
-const enabled = () => app.isPackaged && !process.env.RAMOS_TEST_DATA;
+// Vale para todo app instalado. Não depende de variável de ambiente nem de arquivo editável: nos testes e em desenvolvimento o app não é empacotado.
+const enabled = () => app.isPackaged;
 const CHECK_TIMEOUT_MS = 10_000;
 const marker = () => path.join(app.getPath('userData'), 'atualizacao-pendente.json');
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const notify = (title: string, body: string) => { if (Notification.isSupported()) new Notification({ title, body }).show(); };
-const page = (title: string, detail: string) => 'data:text/html;charset=utf-8,' + encodeURIComponent(
-  `<body style="margin:0;font-family:Segoe UI,sans-serif;background:#0f1115;color:#e8eaf0;display:flex;flex-direction:column;justify-content:center;height:100vh;padding:0 28px;box-sizing:border-box">` +
+const shell = (body: string) => 'data:text/html;charset=utf-8,' + encodeURIComponent(
+  `<body style="margin:0;font-family:Segoe UI,sans-serif;background:#0f1115;color:#e8eaf0;display:flex;flex-direction:column;justify-content:center;height:100vh;padding:0 28px;box-sizing:border-box;user-select:none">${body}</body>`);
+const progressPage = (title: string, detail: string) => shell(
   `<div style="font-size:16px;font-weight:600">${title}</div><div id="d" style="margin-top:6px;font-size:13px;color:#9aa3b5">${detail}</div>` +
-  `<div style="margin-top:16px;height:6px;background:#262b36;border-radius:3px;overflow:hidden"><div id="b" style="height:100%;width:0;background:#5b8def;transition:width .2s"></div></div></body>`);
+  `<div style="margin-top:16px;height:6px;background:#262b36;border-radius:3px;overflow:hidden"><div id="b" style="height:100%;width:0;background:#5b8def;transition:width .2s"></div></div>`);
+// Aviso obrigatório: sem barra de título e sem X; o único caminho é o botão, que sinaliza ao app navegando para o endereço GO_URL.
+const GO_URL = 'ramos-update://atualizar';
+const promptPage = (version: string) => shell(
+  `<div style="font-size:16px;font-weight:600">Atualização obrigatória</div>` +
+  `<div style="margin-top:6px;font-size:13px;color:#9aa3b5">A versão ${version} está disponível. Clique em Atualizar para continuar usando o aplicativo.</div>` +
+  `<button onclick="location.href='${GO_URL}'" autofocus style="margin-top:18px;align-self:flex-start;padding:8px 22px;font-size:13px;border:0;border-radius:6px;background:#5b8def;color:#fff;cursor:pointer">Atualizar</button>`);
 
 // A instalação roda em segundo plano, sem janelas: avisa que começou e deixa um marcador para avisar, na próxima abertura, que terminou.
 function installAndRestart(version: string) {
@@ -33,30 +41,36 @@ function announceInstalledUpdate() {
   } catch { /* sem marcador: nada a avisar */ }
 }
 
-// Baixa e instala a versão nova mostrando o progresso por cima da janela principal.
-async function downloadAndInstall(parent: BrowserWindow | null, version: string) {
+// Mostra o aviso obrigatório e, ao clicar em Atualizar, baixa e instala a versão nova com o progresso na mesma janela (modal sobre a principal).
+async function updateFlow(parent: BrowserWindow | null, version: string) {
   const owner = parent && !parent.isDestroyed() ? parent : undefined;
-  const progress = new BrowserWindow({ width: 420, height: 130, parent: owner, modal: !!owner, frame: false, resizable: false, minimizable: false, maximizable: false, show: false, backgroundColor: '#0f1115', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  progress.on('closed', () => app.quit());
-  await progress.loadURL(page(`Atualizando para a versão ${version}`, 'Baixando a atualização…'));
+  const progress = new BrowserWindow({ width: 440, height: 170, parent: owner, modal: !!owner, frame: false, closable: false, resizable: false, minimizable: false, maximizable: false, show: false, backgroundColor: '#0f1115', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  // Não fecha por Alt+F4 nem por nenhum outro meio, a não ser que o app esteja encerrando.
+  let leaving = false;
+  app.once('before-quit', () => { leaving = true; });
+  owner?.once('closed', () => { leaving = true; if (!progress.isDestroyed()) progress.destroy(); });
+  progress.on('close', event => { if (!leaving) event.preventDefault(); });
+  await progress.loadURL(promptPage(version));
   progress.show();
+  await new Promise<void>(resolve => progress.webContents.on('will-navigate', (event, url) => { event.preventDefault(); if (url === GO_URL) resolve(); }));
+  await progress.loadURL(progressPage(`Atualizando para a versão ${version}`, 'Baixando a atualização…'));
   const show = (percent: number, text: string) => { if (!progress.isDestroyed()) void progress.webContents.executeJavaScript(`document.getElementById('b').style.width='${percent}%';document.getElementById('d').textContent=${JSON.stringify(text)}`).catch(() => {}); };
   autoUpdater!.on('download-progress', p => show(Math.round(p.percent), `Baixando a atualização… ${Math.round(p.percent)}%`));
   for (;;) {
     try { await autoUpdater!.downloadUpdate(); break; }
     catch (error) {
       const choice = await dialog.showMessageBox(progress, { type: 'error', buttons: ['Tentar novamente', 'Sair'], defaultId: 0, cancelId: 1, message: 'Não foi possível baixar a atualização.', detail: `É preciso atualizar para continuar usando o aplicativo.\n${(error as Error).message.slice(0, 200)}` });
-      if (choice.response === 1) { progress.removeAllListeners('closed'); app.quit(); return; }
+      if (choice.response === 1) { leaving = true; app.quit(); return; }
     }
   }
   show(100, 'Instalando… o aplicativo vai reiniciar sozinho em instantes.');
   await wait(3000);
-  progress.removeAllListeners('closed');
+  leaving = true;
   installAndRestart(version);
 }
 
 // Confere ao abrir e a cada 6 horas. Achando versão nova, espera qualquer operação Git terminar (para não interrompê-la)
-// e mostra o aviso obrigatório, que só tem o botão "Atualizar agora".
+// e mostra o aviso obrigatório, que só tem o botão "Atualizar".
 export function watchForUpdates(getWindow: () => BrowserWindow | null, isBusy: () => boolean) {
   if (!enabled()) return;
   announceInstalledUpdate();
@@ -67,17 +81,18 @@ export function watchForUpdates(getWindow: () => BrowserWindow | null, isBusy: (
     try {
       const fresh = !autoUpdater;
       const updater = await loadUpdater();
-      if (fresh) { updater.autoDownload = false; updater.autoInstallOnAppQuit = false; updater.on('error', () => {}); }
+      if (fresh) {
+        // O endereço das Releases fica no código, e não só no app-update.yml da pasta de instalação (que o usuário poderia apagar ou editar).
+        updater.setFeedURL({ provider: 'github', owner: 'luizg99', repo: 'gerenciador-ramos-git' });
+        updater.autoDownload = false; updater.autoInstallOnAppQuit = false; updater.on('error', () => {});
+      }
       const result = await Promise.race([updater.checkForUpdates(), wait(CHECK_TIMEOUT_MS).then(() => null)]);
       if (!result?.isUpdateAvailable) return;
       version = result.updateInfo.version;
     } catch { return; }
     prompting = true;
     while (isBusy()) await wait(2000);
-    const window = getWindow();
-    const options = { type: 'info' as const, buttons: ['Atualizar agora'], defaultId: 0, cancelId: 0, noLink: true, message: `Nova versão disponível: ${version}.`, detail: 'É obrigatório atualizar para continuar usando o aplicativo. O download e a instalação são automáticos e o aplicativo reabre sozinho.' };
-    if (window && !window.isDestroyed()) await dialog.showMessageBox(window, options); else await dialog.showMessageBox(options);
-    await downloadAndInstall(getWindow(), version);
+    await updateFlow(getWindow(), version);
   };
   setTimeout(() => void check(), 5000);
   setInterval(() => void check(), 6 * 60 * 60 * 1000);
