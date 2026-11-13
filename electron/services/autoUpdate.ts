@@ -12,6 +12,10 @@ const loadUpdater = async () => (autoUpdater ??= (require('electron-updater') as
 // Vale para todo app instalado. Não depende de variável de ambiente nem de arquivo editável: nos testes e em desenvolvimento o app não é empacotado.
 const enabled = () => app.isPackaged;
 const CHECK_TIMEOUT_MS = 10_000;
+const logFile = () => path.join(app.getPath('userData'), 'atualizacao.log');
+const log = (level: string, message: unknown) => { try { fs.appendFileSync(logFile(), `${new Date().toISOString()} ${level} ${message instanceof Error ? message.stack ?? message.message : String(message)}
+`); } catch { /* sem log, o app segue */ } };
+const STALL_MS = 60_000;
 const marker = () => path.join(app.getPath('userData'), 'atualizacao-pendente.json');
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const notify = (title: string, body: string) => { if (Notification.isSupported()) new Notification({ title, body }).show(); };
@@ -55,13 +59,24 @@ async function updateFlow(parent: BrowserWindow | null, version: string) {
   await new Promise<void>(resolve => progress.webContents.on('will-navigate', (event, url) => { event.preventDefault(); if (url === GO_URL) resolve(); }));
   await progress.loadURL(progressPage(`Atualizando para a versão ${version}`, 'Baixando a atualização…'));
   const show = (percent: number, text: string) => { if (!progress.isDestroyed()) void progress.webContents.executeJavaScript(`document.getElementById('b').style.width='${percent}%';document.getElementById('d').textContent=${JSON.stringify(text)}`).catch(() => {}); };
-  autoUpdater!.on('download-progress', p => show(Math.round(p.percent), `Baixando a atualização… ${Math.round(p.percent)}%`));
+  let lastProgress = Date.now();
+  autoUpdater!.on('download-progress', p => { lastProgress = Date.now(); show(Math.round(p.percent), `Baixando a atualização… ${Math.round(p.percent)}%`); });
+  const { CancellationToken } = require('electron-updater') as typeof import('electron-updater');
   for (;;) {
-    try { await autoUpdater!.downloadUpdate(); break; }
+    // Sem nenhum progresso por 60 s o download é cancelado, e o cliente escolhe entre tentar de novo ou sair (antes ficava parado para sempre).
+    const token = new CancellationToken(); lastProgress = Date.now(); let stalled = false;
+    const watchdog = setInterval(() => { if (Date.now() - lastProgress > STALL_MS) { stalled = true; token.cancel(); } }, 5000);
+    try { log('INFO', `baixando a versão ${version}`); await autoUpdater!.downloadUpdate(token); log('INFO', 'download concluído'); break; }
     catch (error) {
-      const choice = await dialog.showMessageBox(progress, { type: 'error', buttons: ['Tentar novamente', 'Sair'], defaultId: 0, cancelId: 1, message: 'Não foi possível baixar a atualização.', detail: `É preciso atualizar para continuar usando o aplicativo.\n${(error as Error).message.slice(0, 200)}` });
+      log('ERROR', error);
+      const reason = stalled ? 'O download ficou parado por mais de 1 minuto. Verifique a internet, o proxy ou o antivírus.' : (error as Error).message.slice(0, 200);
+      const choice = await dialog.showMessageBox(progress, { type: 'error', buttons: ['Tentar novamente', 'Sair'], defaultId: 0, cancelId: 1, message: 'Não foi possível baixar a atualização.', detail: `É preciso atualizar para continuar usando o aplicativo.
+${reason}
+Detalhes em: ${logFile()}` });
       if (choice.response === 1) { leaving = true; app.quit(); return; }
+      show(0, 'Baixando a atualização…');
     }
+    finally { clearInterval(watchdog); }
   }
   show(100, 'Instalando… o aplicativo vai reiniciar sozinho em instantes.');
   await wait(3000);
@@ -84,7 +99,10 @@ export function watchForUpdates(getWindow: () => BrowserWindow | null, isBusy: (
       if (fresh) {
         // O endereço das Releases fica no código, e não só no app-update.yml da pasta de instalação (que o usuário poderia apagar ou editar).
         updater.setFeedURL({ provider: 'github', owner: 'luizg99', repo: 'gerenciador-ramos-git' });
-        updater.autoDownload = false; updater.autoInstallOnAppQuit = false; updater.on('error', () => {});
+        updater.autoDownload = false; updater.autoInstallOnAppQuit = false; updater.on('error', error => log('ERROR', error));
+        // Instalador inteiro de uma vez: o download diferencial (blockmap) às vezes não reporta progresso nem termina.
+        updater.disableDifferentialDownload = true;
+        updater.logger = { info: m => log('INFO', m), warn: m => log('WARN', m), error: m => log('ERROR', m) };
       }
       const result = await Promise.race([updater.checkForUpdates(), wait(CHECK_TIMEOUT_MS).then(() => null)]);
       if (!result?.isUpdateAvailable) return;
