@@ -28,7 +28,7 @@ const productionUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).
 function applyTheme() {
   const theme = controller.settings.theme ?? 'dark';
   nativeTheme.themeSource = theme;
-  window?.setBackgroundColor(theme === 'light' ? '#f4f6fa' : '#0f1115');
+  window?.setBackgroundColor(theme === 'light' ? '#ffffff' : '#0a0a0b');
 }
 if (process.env.RAMOS_TEST_DATA && !app.isPackaged) app.setPath('userData', process.env.RAMOS_TEST_DATA);
 function registerIpc() {
@@ -145,7 +145,7 @@ function registerIpc() {
   handle('git:resume', z.tuple([id, z.string().uuid(), z.enum(['retry', 'manual'])]), (id, executionId, action) => controller.mutate(id, repo => controller.cherry.resume(repo, executionId, action)));
 }
 async function createWindow() {
-  window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 700, backgroundColor: '#0e1118', title: 'Gerenciador de Ramos', icon: path.join(__dirname, '../build/icon.ico'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 700, backgroundColor: '#0a0a0b', title: 'Gerenciador de Ramos', icon: path.join(__dirname, '../build/icon.ico'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.on('focus', () => window?.flashFrame(false));
   installTextContextMenu(window);
   gemini = new GeminiBrowser(window, state => { if (window && !window.isDestroyed()) window.webContents.send('gemini:changed', state); });
