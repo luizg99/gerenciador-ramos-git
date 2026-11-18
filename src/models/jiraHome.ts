@@ -18,23 +18,38 @@ export interface HomeIssue {
   };
 }
 export interface HomeCard { key: string; summary: string; type: string; status: string; category: string; priority: string; sprint: string; sprintStart: number; mine: boolean; children: HomeCard[] }
-export interface HomeColumn { status: string; category: string; cards: HomeCard[] }
+// id identifica a coluna (a do quadro do Jira ou, para status fora dela, "extra:<status>"); status é o nome mostrado.
+export interface HomeColumn { id: string; status: string; category: string; cards: HomeCard[]; fixed?: boolean }
 
-// O Jira não informa a ordem do fluxo; ela é deduzida pelo nome do status (aberto → desenvolvimento → revisão → teste → aguardando → concluído).
-// Status que não casam com nenhum nome caem pela categoria do Jira (a fazer / em andamento / concluído) e, por fim, por ordem alfabética.
-const flowOrder: RegExp[] = [
-  /^(open|opened|aberto|aberta|backlog|to ?do|a fazer|novo|nova|new|pendente|selected for development)(\s|$)/i,
-  /desenvolv|in progress|progress|andamento|doing|codifica|implement/i,
-  /revis|review|aprova/i,
-  /test|(^|\s)qa(\s|$)|valida|homolog|verifica/i,
-  /imped|bloquead|blocked|pausad|on hold|hold|aguard|waiting|wait/i,
-  /conclu|done|pronto|resolvid|resolved|closed|fechad|finaliz/i
+// Colunas do quadro do Jira da equipe, nesta ordem. Ficam sempre visíveis (mesmo vazias), para dar para arrastar um cartão até elas.
+export const BOARD_COLUMNS = [
+  { id: 'a-fazer', label: 'A fazer', category: 'new' },
+  { id: 'em-desenvolvimento', label: 'Em desenvolvimento', category: 'indeterminate' },
+  { id: 'pronto-revisao', label: 'Pronto pra revisão', category: 'indeterminate' },
+  { id: 'em-revisao', label: 'Em revisão', category: 'indeterminate' },
+  { id: 'pronto-testar', label: 'Pronto pra testar', category: 'indeterminate' },
+  { id: 'em-teste', label: 'Em teste de aceitação', category: 'indeterminate' },
+  { id: 'teste-concluido', label: 'Teste concluído', category: 'indeterminate' },
+  { id: 'finalizado', label: 'Finalizado', category: 'done' }
+] as const;
+// O nome do status decide a coluna (vários status podem cair na mesma, como "Open" e "A fazer"). Do mais específico para o mais genérico.
+const boardMatchers: [string, RegExp][] = [
+  ['pronto-revisao', /(pronto|pronta|ready|aguard\w*).*(revis|review)/i],
+  ['pronto-testar', /(pronto|pronta|ready|aguard\w*).*(test|qa)/i],
+  ['teste-concluido', /(test|qa|aceita).*(conclu|aprovad|passed|done)/i],
+  ['em-revisao', /revis|review|aprova/i],
+  ['em-teste', /test|aceita|(^|\s)qa(\s|$)|valida|homolog|verifica/i],
+  ['em-desenvolvimento', /desenvolv|in progress|progress|andamento|doing|codifica|implement/i],
+  ['a-fazer', /^(open|opened|aberto|aberta|backlog|to ?do|a fazer|novo|nova|new|pendente|selected for development)(\s|$)/i],
+  ['finalizado', /finaliz|conclu|done|pronto|resolvid|resolved|closed|fechad/i]
 ];
-export function statusRank(name: string, category: string): number {
-  const index = flowOrder.findIndex(pattern => pattern.test(name.trim()));
-  if (index >= 0) return index;
-  return category === 'new' ? 0.5 : category === 'indeterminate' ? 1.5 : category === 'done' ? 5.5 : 3.5;
-}
+export const columnIdFor = (status: string): string | null => boardMatchers.find(([, pattern]) => pattern.test(status.trim()))?.[0] ?? null;
+export const cardColumnId = (card: { status: string }): string => columnIdFor(card.status) ?? `extra:${card.status}`;
+// Status que não casam com nenhuma coluna do quadro ganham uma coluna extra, posicionada pela categoria do Jira.
+const columnRank = (column: HomeColumn): number => {
+  const index = BOARD_COLUMNS.findIndex(item => item.id === column.id);
+  return index >= 0 ? index : column.category === 'new' ? 0.5 : column.category === 'done' ? 7.5 : 4.5;
+};
 // Uma tarefa que passou por várias sprints (carregada de uma para outra) mostra a mais recente.
 export function latestSprint(sprints: SprintRef[]): SprintRef | undefined {
   if (!sprints.some(item => item.start > 0)) return sprints[sprints.length - 1];
@@ -62,13 +77,15 @@ export function buildHomeBoard(issues: HomeIssue[], sprintsOf: (issue: HomeIssue
     // A principal entra na ordem do primeiro filho encontrado; só vira raiz se ela mesma não for filha de outra.
     if (!issues.some(other => other.key === parent.key && other.fields.parent)) place(parent.key, parentCard);
   }
-  const columns = new Map<string, HomeColumn>();
+  const columns = new Map<string, HomeColumn>(BOARD_COLUMNS.map(item => [item.id, { id: item.id, status: item.label, category: item.category, cards: [], fixed: true }]));
   for (const root of roots) {
-    const column = columns.get(root.status) ?? { status: root.status, category: root.category, cards: [] };
-    column.cards.push(root); columns.set(root.status, column);
+    const id = cardColumnId(root);
+    const column = columns.get(id) ?? { id, status: root.status, category: root.category, cards: [] };
+    column.cards.push(root); columns.set(id, column);
   }
-  return [...columns.values()].sort((a, b) => statusRank(a.status, a.category) - statusRank(b.status, b.category) || a.status.localeCompare(b.status, 'pt-BR'));
+  return [...columns.values()].sort((a, b) => columnRank(a) - columnRank(b) || a.status.localeCompare(b.status, 'pt-BR'));
 }
+export const hasCards = (columns: HomeColumn[]): boolean => columns.some(column => column.cards.length > 0);
 export const countMine = (columns: HomeColumn[]): number => {
   const count = (card: HomeCard): number => (card.mine ? 1 : 0) + card.children.reduce((sum, child) => sum + count(child), 0);
   return columns.reduce((sum, column) => sum + column.cards.reduce((inner, card) => inner + count(card), 0), 0);
@@ -84,7 +101,7 @@ export function filterBySprint(columns: HomeColumn[], sprint: string): HomeColum
     const children = card.children.map(prune).filter((child): child is HomeCard => !!child);
     return matches(card) || children.length ? { ...card, children } : null;
   };
-  return columns.map(column => ({ ...column, cards: column.cards.map(prune).filter((card): card is HomeCard => !!card) })).filter(column => column.cards.length);
+  return columns.map(column => ({ ...column, cards: column.cards.map(prune).filter((card): card is HomeCard => !!card) })).filter(column => column.fixed || column.cards.length);
 }
 export function sprintOptions(columns: HomeColumn[]): { name: string; start: number }[] {
   const found = new Map<string, number>();
@@ -101,7 +118,9 @@ export const hasWithoutSprint = (columns: HomeColumn[]): boolean => {
 export interface JiraMove { id: string; name: string; to?: { name: string } }
 export const moveTarget = (move: JiraMove) => move.to?.name ?? move.name;
 export const sameStatus = (a: string, b: string) => a.trim().toLocaleLowerCase('pt-BR') === b.trim().toLocaleLowerCase('pt-BR');
-export const findMove = (moves: JiraMove[], status: string): JiraMove | undefined => moves.find(move => sameStatus(moveTarget(move), status));
+// A transição que leva à coluna: pelo mesmo nome de status ou por qualquer status que o quadro coloque naquela coluna.
+export const findMove = (moves: JiraMove[], column: { id: string; status: string }): JiraMove | undefined =>
+  moves.find(move => sameStatus(moveTarget(move), column.status)) ?? moves.find(move => (columnIdFor(moveTarget(move)) ?? `extra:${moveTarget(move)}`) === column.id);
 export function findCard(columns: HomeColumn[], key: string): HomeCard | undefined {
   const search = (card: HomeCard): HomeCard | undefined => card.key === key ? card : card.children.map(search).find(Boolean);
   for (const column of columns) for (const card of column.cards) { const found = search(card); if (found) return found; }

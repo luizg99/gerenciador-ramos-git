@@ -998,3 +998,15 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .menu-label{display:block;padding:4px 10px 2px;font-size:11px;font-weight:600;color:var(--subtle)}
 .menu-note{display:block;padding:6px 10px;font-size:12px;color:var(--muted);max-width:260px;overflow-wrap:anywhere}
 .file-context-menu small{color:var(--subtle)}
+.kanban-column{flex:0 0 292px}
+.kanban-empty{margin:0;padding:18px 8px;text-align:center;font-size:12px;color:var(--subtle)}
+.kanban-empty-note{margin:0;font-size:13px;color:var(--muted)}
+
+/* Quadro com as 8 colunas do Jira: largura confortável; se não couber na janela, rola na horizontal */
+.kanban-columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(210px,1fr);gap:10px;align-items:start;overflow-x:auto;padding-bottom:14px}
+.kanban-column{flex:none;min-width:0;width:auto;padding:10px}
+.kanban-card,.kanban-children,.kanban-card-top{min-width:0}
+.kanban-card{overflow-wrap:anywhere}
+.kanban-key{white-space:nowrap}
+@media(max-width:1280px){.project-switcher-button:not(:has(strong)) .lead{display:inline}}
+.kanban-column h2{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25}

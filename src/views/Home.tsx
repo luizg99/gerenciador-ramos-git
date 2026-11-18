@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppController } from '../controllers/appController';
 import { JIRA_BASE } from '../models/jira';
-import { NO_SPRINT, countMine, filterBySprint, findCard, findMove, hasWithoutSprint, moveTarget, sameStatus, sprintOptions, type HomeCard, type HomeColumn, type JiraMove } from '../models/jiraHome';
+import { NO_SPRINT, cardColumnId, countMine, filterBySprint, findCard, findMove, hasCards, hasWithoutSprint, moveTarget, sameStatus, sprintOptions, type HomeCard, type HomeColumn, type JiraMove } from '../models/jiraHome';
 import { cachedBoard, fetchMoves, fetchMyBoard, moveIssue } from './jiraMine';
 
 // A sprint escolhida no filtro fica guardada; a última lista (cache) aparece na hora ao voltar para o Início e é atualizada por trás.
@@ -62,16 +62,16 @@ export function Home({ c }: { c: AppController }) {
     catch (cause) { setMoveError(`Não foi possível mover ${key} para “${to}”: ${(cause as Error).message}`); }
     finally { setMoving(false); }
   };
-  const dropOn = async (status: string) => {
+  const dropOn = async (column: HomeColumn) => {
     const key = dragging; setDragging(null); setOver('');
     const card = key && columns ? findCard(columns, key) : undefined;
-    if (!key || !card || sameStatus(card.status, status)) return;
+    if (!key || !card || cardColumnId(card) === column.id) return;
     setMoving(true); setMoveError('');
     try {
       const items = await fetchMoves(key);
-      const move = findMove(items, status);
-      if (!move) setMoveError(`Não há transição de “${card.status}” para “${status}” em ${key} no fluxo do Jira.${items.length ? ` Destinos possíveis: ${items.map(moveTarget).join(', ')}.` : ''}`);
-      else setPending({ key, from: card.status, to: status, move });
+      const move = findMove(items, column);
+      if (!move) setMoveError(`Não há transição de “${card.status}” para “${column.status}” em ${key} no fluxo do Jira.${items.length ? ` Destinos possíveis: ${items.map(moveTarget).join(', ')}.` : ''}`);
+      else setPending({ key, from: card.status, to: moveTarget(move), move });
     } catch (cause) { setMoveError(`Não foi possível consultar as transições de ${key}: ${(cause as Error).message}`); }
     finally { setMoving(false); }
   };
@@ -120,13 +120,18 @@ export function Home({ c }: { c: AppController }) {
     </div>
     {moveError && <div className="alert error" role="alert"><strong>Status não alterado</strong><p>{moveError}</p><button onClick={() => setMoveError('')}>Fechar</button></div>}
     {error && <div className="alert error" role="alert"><strong>Não foi possível carregar suas tarefas</strong><p>{error}</p><div className="kanban-error-actions"><button onClick={() => void load()}>Tentar de novo</button><button onClick={() => c.selectTab('jira')}>Abrir o Jira para fazer login</button></div></div>}
-    {shown && !shown.length && !error && <section className="card"><div className="empty small">{effective ? 'Nenhuma tarefa sua nessa sprint.' : 'Nenhuma tarefa em aberto atribuída a você.'}</div></section>}
-    {!!shown?.length && <div className="kanban-columns">{shown.map(column => <section className={`kanban-column${over === column.status ? ' drop' : ''}`} key={column.status} aria-label={`Coluna ${column.status}`}
-      onDragOver={event => { if (dragging && !moving) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; if (over !== column.status) setOver(column.status); } }}
-      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(current => current === column.status ? '' : current); }}
-      onDrop={event => { event.preventDefault(); void dropOn(column.status); }}>
+    {shown && !hasCards(shown) && !error && <p className="kanban-empty-note">{effective ? 'Nenhuma tarefa sua nessa sprint.' : 'Nenhuma tarefa em aberto atribuída a você.'}</p>}
+    {!!shown?.length && <div className="kanban-columns" onDragOver={event => {
+      // Arrastando um cartão perto da borda, a lista de colunas rola sozinha para dar para chegar às colunas fora da tela.
+      if (!dragging) return;
+      const box = event.currentTarget.getBoundingClientRect();
+      if (event.clientX < box.left + 90) event.currentTarget.scrollLeft -= 28; else if (event.clientX > box.right - 90) event.currentTarget.scrollLeft += 28;
+    }}>{shown.map(column => <section className={`kanban-column${over === column.id ? ' drop' : ''}`} key={column.id} aria-label={`Coluna ${column.status}`}
+      onDragOver={event => { if (dragging && !moving) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; if (over !== column.id) setOver(column.id); } }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(current => current === column.id ? '' : current); }}
+      onDrop={event => { event.preventDefault(); void dropOn(column); }}>
       <header><span className={`kanban-dot cat-${column.category}`} aria-hidden="true"/><h2>{column.status}</h2><span className="count">{column.cards.length}</span></header>
-      <div className="kanban-cards">{column.cards.map(card => <Card key={card.key} card={card} actions={{ onMenu: openMenu, onDrag: setDragging, dragging }}/>)}</div>
+      <div className="kanban-cards">{!column.cards.length && <p className="kanban-empty">{dragging ? 'Solte aqui' : 'Sem tarefas'}</p>}{column.cards.map(card => <Card key={card.key} card={card} actions={{ onMenu: openMenu, onDrag: setDragging, dragging }}/>)}</div>
     </section>)}</div>}
     {menu && <div className="file-context-menu" role="menu" style={{ left: menu.x, top: menu.y }} onMouseDown={event => event.stopPropagation()}>
       <button role="menuitem" onClick={() => copyKey(menu.key)}>Copiar número da issue ({menu.key})</button>

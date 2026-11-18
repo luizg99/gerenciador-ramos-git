@@ -53,14 +53,16 @@ test('Início: só aparece com "Usa Jira" e mostra as tarefas do usuário em col
   const sprintFilter = page.getByLabel('Filtrar por sprint');
   await expect(sprintFilter).toHaveValue('Sprint 13');
   await expect(page.getByText('tarefas atribuídas').or(page.getByText('tarefa atribuída'))).toContainText('1');
-  expect(await page.locator('.kanban-column h2').allTextContents()).toEqual(['Em teste']);
+  const filled = () => page.locator('.kanban-column').filter({ has: page.locator('.kanban-card') }).locator('h2').allTextContents();
+  expect(await filled()).toEqual(['Em teste de aceitação']);
+  // As 8 colunas do quadro do Jira ficam sempre visíveis, mesmo vazias.
+  expect(await page.locator('.kanban-column h2').allTextContents()).toEqual(['A fazer', 'Em desenvolvimento', 'Pronto pra revisão', 'Em revisão', 'Pronto pra testar', 'Em teste de aceitação', 'Teste concluído', 'Finalizado']);
   await sprintFilter.selectOption({ label: 'Todas as sprints' });
   await expect(page.getByText('tarefas atribuídas')).toContainText('4');
   await expect(page.getByText('Luiz Ramos')).toBeVisible();
   expect(await app.evaluate(() => (globalThis as any).homeJql)).toContain('assignee = currentUser()');
-  // Colunas por status: "Aberto" (a fazer) vem antes dos "em andamento".
-  const columns = await page.locator('.kanban-column h2').allTextContents();
-  expect(columns).toEqual(['Aberto', 'Em desenvolvimento', 'Em teste']);
+  // "Aberto" cai em "A fazer", antes de "Em desenvolvimento" e das colunas de revisão e teste.
+  expect(await filled()).toEqual(['A fazer', 'Em desenvolvimento', 'Em teste de aceitação']);
   // Cascata: a sub-tarefa fica dentro do cartão da principal, que não se repete.
   const parent = page.locator('.kanban-card', { hasText: 'DDV-101' }).first();
   await expect(parent.locator('.kanban-children')).toContainText('DDV-102');
@@ -181,6 +183,8 @@ test('Início: muda o status pelo menu "Mover para" e arrastando o cartão (com 
   await page.waitForTimeout(1500);
   await page.getByRole('button', { name: 'Início', exact: true }).click();
   await expect(page.locator('.kanban-card', { hasText: 'DDV-101' })).toHaveCount(1);
+  // As 8 colunas são largas e rolam na horizontal; o zoom menor deixa todas na tela para o teste arrastar entre elas.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(0.55));
 
   // Menu "Mover para": só os destinos permitidos, sem o status atual.
   await page.locator('.kanban-card', { hasText: 'DDV-101' }).locator('.kanban-summary').click({ button: 'right' });
@@ -189,7 +193,7 @@ test('Início: muda o status pelo menu "Mover para" e arrastando o cartão (com 
   await expect(page.getByRole('menuitem', { name: 'Mover para Em desenvolvimento' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Mover para Em teste' }).click();
   await expect(page.getByText('DDV-101 movida para Em teste')).toBeVisible();
-  await expect(page.getByLabel('Coluna Em teste').locator('.kanban-card', { hasText: 'DDV-101' })).toHaveCount(1);
+  await expect(page.getByLabel('Coluna Em teste de aceitação').locator('.kanban-card', { hasText: 'DDV-101' })).toHaveCount(1);
   expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste']);
 
   // Arrastar para outra coluna: pede confirmação e só então move; cancelar não muda nada.
@@ -204,8 +208,8 @@ test('Início: muda o status pelo menu "Mover para" e arrastando o cartão (com 
   expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste', 'DDV-300:Em desenvolvimento']);
 
   // Destino sem transição no fluxo: avisa, mostra os destinos possíveis e não chama o Jira.
-  await page.locator('.kanban-card', { hasText: 'DDV-300' }).dragTo(page.getByLabel('Coluna Em teste'));
-  await expect(page.getByRole('alert')).toContainText('Não há transição de “Em desenvolvimento” para “Em teste” em DDV-300');
+  await page.locator('.kanban-card', { hasText: 'DDV-300' }).dragTo(page.getByLabel('Coluna Em teste de aceitação'));
+  await expect(page.getByRole('alert')).toContainText('Não há transição de “Em desenvolvimento” para “Em teste de aceitação” em DDV-300');
   await expect(page.getByRole('alert')).toContainText('Destinos possíveis: Em desenvolvimento');
   await expect(page.getByRole('heading', { name: 'Mover DDV-300?' })).toBeHidden();
   expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste', 'DDV-300:Em desenvolvimento']);
