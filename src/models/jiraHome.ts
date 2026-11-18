@@ -20,7 +20,21 @@ export interface HomeIssue {
 export interface HomeCard { key: string; summary: string; type: string; status: string; category: string; priority: string; sprint: string; sprintStart: number; mine: boolean; children: HomeCard[] }
 export interface HomeColumn { status: string; category: string; cards: HomeCard[] }
 
-const categoryRank = (category: string) => category === 'new' ? 0 : category === 'indeterminate' ? 1 : category === 'done' ? 3 : 2;
+// O Jira não informa a ordem do fluxo; ela é deduzida pelo nome do status (aberto → desenvolvimento → revisão → teste → aguardando → concluído).
+// Status que não casam com nenhum nome caem pela categoria do Jira (a fazer / em andamento / concluído) e, por fim, por ordem alfabética.
+const flowOrder: RegExp[] = [
+  /^(open|opened|aberto|aberta|backlog|to ?do|a fazer|novo|nova|new|pendente|selected for development)(\s|$)/i,
+  /desenvolv|in progress|progress|andamento|doing|codifica|implement/i,
+  /revis|review|aprova/i,
+  /test|(^|\s)qa(\s|$)|valida|homolog|verifica/i,
+  /imped|bloquead|blocked|pausad|on hold|hold|aguard|waiting|wait/i,
+  /conclu|done|pronto|resolvid|resolved|closed|fechad|finaliz/i
+];
+export function statusRank(name: string, category: string): number {
+  const index = flowOrder.findIndex(pattern => pattern.test(name.trim()));
+  if (index >= 0) return index;
+  return category === 'new' ? 0.5 : category === 'indeterminate' ? 1.5 : category === 'done' ? 5.5 : 3.5;
+}
 // Uma tarefa que passou por várias sprints (carregada de uma para outra) mostra a mais recente.
 export function latestSprint(sprints: SprintRef[]): SprintRef | undefined {
   if (!sprints.some(item => item.start > 0)) return sprints[sprints.length - 1];
@@ -53,7 +67,7 @@ export function buildHomeBoard(issues: HomeIssue[], sprintsOf: (issue: HomeIssue
     const column = columns.get(root.status) ?? { status: root.status, category: root.category, cards: [] };
     column.cards.push(root); columns.set(root.status, column);
   }
-  return [...columns.values()].sort((a, b) => categoryRank(a.category) - categoryRank(b.category) || a.status.localeCompare(b.status, 'pt-BR'));
+  return [...columns.values()].sort((a, b) => statusRank(a.status, a.category) - statusRank(b.status, b.category) || a.status.localeCompare(b.status, 'pt-BR'));
 }
 export const countMine = (columns: HomeColumn[]): number => {
   const count = (card: HomeCard): number => (card.mine ? 1 : 0) + card.children.reduce((sum, child) => sum + count(child), 0);

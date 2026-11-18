@@ -79,4 +79,13 @@ describe('quadro da tela inicial', () => {
     expect(filterBySprint(board, '')).toBe(board);
     expect(filterBySprint(board, 'Sprint 99')).toEqual([]);
   });
+
+  it('ordena as colunas pelo fluxo (aberto → desenvolvimento → revisão → teste → aguardando → concluído), mesmo na mesma categoria', () => {
+    const board = buildHomeBoard([
+      issue('F-1', status('Em Desenvolvimento', 'indeterminate')), issue('F-2', status('Open', 'indeterminate')), issue('F-3', status('Concluído', 'done')),
+      issue('F-4', status('Em Teste', 'indeterminate')), issue('F-5', status('Code Review', 'indeterminate')), issue('F-6', status('Aguardando cliente', 'indeterminate')),
+      issue('F-7', status('Status esquisito', 'indeterminate')), issue('F-8', status('Backlog', 'new'))
+    ]);
+    expect(board.map(column => column.status)).toEqual(['Backlog', 'Open', 'Em Desenvolvimento', 'Status esquisito', 'Code Review', 'Em Teste', 'Aguardando cliente', 'Concluído']);
+  });
 });
