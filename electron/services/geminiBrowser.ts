@@ -1,6 +1,6 @@
 import { WebContentsView, type BrowserWindow } from 'electron';
 import { keepLoginsAcrossRestarts } from './persistentSession';
-import { GEM_URL, gemUrlForAccount, isGeminiHome, isGemStartUrl, type GeminiBounds, type GeminiState } from '../../src/models/gemini';
+import { GEM_URL, chromeUserAgent, gemUrlForAccount, isGeminiHome, isGemStartUrl, type GeminiBounds, type GeminiState } from '../../src/models/gemini';
 
 function navigationAborted(error: unknown) {
   return /ERR_ABORTED\s*\(-3\)/.test(error instanceof Error ? error.message : String(error));
@@ -91,7 +91,7 @@ export class GeminiBrowser {
     // Google serves Gemini as Chrome-only in some flows. Electron appends its
     // own product tokens, which can route the Gem to an unsupported-client reply.
     // Aplicado também à sessão, para a janela de login (popup) não se identificar como Electron: o Google derruba sessões de clientes assim.
-    const userAgent = contents.getUserAgent().replace(/\s+gerenciador-de-ramos\/[^\s]+\s+Chrome\/([^\s]+)\s+Electron\/[^\s]+/, ' Chrome/$1');
+    const userAgent = chromeUserAgent(contents.getUserAgent());
     contents.setUserAgent(userAgent); contents.session.setUserAgent(userAgent);
     keepLoginsAcrossRestarts(contents.session);
     const canWriteGeminiClipboard = (requestingContents: Electron.WebContents | null, permission: string, requestingUrl: string, isMainFrame: boolean) => {

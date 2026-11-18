@@ -12,7 +12,7 @@ export interface Commit { hash: string; subject: string; author: string; date: s
 export interface CommitDetail { files: string[]; diff: string }
 export interface CommitReview { tree: string; head: string | null; diff: string; files: string[] }
 export interface Settings { roots: string[]; activeRepository?: string; usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string; ui?: UiPreferences }
-export interface UiPreferences { azureOrganizationUrl?: string; dynamicBranches?: boolean; installOnSwitch?: boolean; rememberPrDestinations?: boolean; prDestinations?: Record<string, string[]> }
+export interface UiPreferences { azureOrganizationUrl?: string; dynamicBranches?: boolean; installOnSwitch?: boolean; rememberPrDestinations?: boolean; prDestinations?: string[]; rememberBranchBases?: boolean; branchBases?: string[]; jiraSquad?: string[]; jiraIgnored?: string[]; jiraPeriod?: number; jiraFrom?: string; jiraTo?: string }
 export type SettingsPatch = { usePman?: boolean; useGemini?: boolean; useJira?: boolean; useAzure?: boolean; theme?: 'light' | 'dark'; reviewHistoryPath?: string; ui?: UiPreferences }
 export interface TortoiseOptions { ref?: string; rev?: string }
 export interface CherryPlan { source: string; commits: string[]; targets: string[] }

@@ -59,3 +59,5 @@ export function parsePrLinks(value = ''): string[] {
   return [...links.values()];
 }
 export const originalEstimateSeconds = (issue: JiraIssue) => issue.fields.timeoriginalestimate ?? issue.fields.timetracking?.originalEstimateSeconds ?? issue.fields.aggregatetimeoriginalestimate ?? 0;
+// Estimativa digitada na própria tarefa, sem a soma das subtarefas que o Jira devolve em aggregatetimeoriginalestimate.
+export const ownEstimateSeconds = (issue: JiraIssue) => issue.fields.timeoriginalestimate ?? issue.fields.timetracking?.originalEstimateSeconds ?? 0;

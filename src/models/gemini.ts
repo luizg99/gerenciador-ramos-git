@@ -49,3 +49,8 @@ export function isGemStartUrl(value: string) {
     return url.origin === 'https://gemini.google.com' && /^\/(?:u\/\d+\/)?gem\/3bf604e9d2f3\/?$/.test(url.pathname);
   } catch { return false; }
 }
+
+// Remove o token do app (o nome varia: "gerenciador-de-ramos" no dev, "GerenciadordeRamos" com o productName empacotado) e o token Electron.
+export function chromeUserAgent(userAgent: string) {
+  return userAgent.replace(/(\(KHTML, like Gecko\))\s+\S+\/\S+\s+(?=Chrome\/)/, '$1 ').replace(/\s+Electron\/\S+/, '').replace(/\s+/g, ' ').trim();
+}

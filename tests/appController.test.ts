@@ -33,11 +33,11 @@ describe('AppController', () => {
     await c.createPullRequests();
     expect(createPullRequests).toHaveBeenCalledWith(a.id, [{ source: 'feature', target: 'main' }], '');
     expect(c.getSnapshot().prRows.map(row => row.target)).toEqual(['main', '', '', '']);
-    expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual({ [a.id]: ['main'] });
-    expect(updateSettings).toHaveBeenLastCalledWith({ ui: { prDestinations: { [a.id]: ['main'] } } });
+    expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual(['main']);
+    expect(updateSettings).toHaveBeenLastCalledWith({ ui: { prDestinations: ['main'] } });
     c.setRememberPrDestinations(false);
     expect(c.getSnapshot().prRows.every(row => !row.target)).toBe(true);
-    expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual({ [a.id]: [] });
+    expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual([]);
   });
   it('preenche as origens com pushes recentes sem sobrescrever uma limpeza feita pelo usuário', async () => {
     let finishRecent!: (branches: string[]) => void;
@@ -82,7 +82,7 @@ describe('AppController', () => {
     expect(c.getSnapshot().source).toBe('outro');
   });
   it('lembra os checks e a organização Azure entre aberturas, lendo do settings.json', async () => {
-    const saved = { roots: [], activeRepository: a.id, ui: { dynamicBranches: true, installOnSwitch: true, rememberPrDestinations: true, azureOrganizationUrl: 'https://totvstfs.visualstudio.com/Linha-Winthor', prDestinations: { [a.id]: ['main'] } } };
+    const saved = { roots: [], activeRepository: a.id, ui: { dynamicBranches: true, installOnSwitch: true, rememberPrDestinations: true, azureOrganizationUrl: 'https://totvstfs.visualstudio.com/Linha-Winthor', prDestinations: ['main'] } };
     const first = new AppController(fakeApi().api);
     expect(first.getSnapshot()).toMatchObject({ dynamicBranches: false, dynamicPr: true, installOnSwitch: false, rememberPrDestinations: false, publishNew: true });
     expect(first.getSnapshot().prRows).toHaveLength(4);
@@ -91,6 +91,26 @@ describe('AppController', () => {
     await vi.waitFor(() => expect(second.getSnapshot().loadingRepository).toBe(false));
     expect(second.getSnapshot()).toMatchObject({ dynamicBranches: true, dynamicPr: true, installOnSwitch: true, rememberPrDestinations: true, publishNew: true, switchRow: 0 });
     expect(second.azureOrganizationUrl).toBe('https://totvstfs.visualstudio.com/Linha-Winthor');
+  });
+  it('busca os ramos do remoto ao abrir o projeto e lembra os destinos para qualquer projeto', async () => {
+    const saved = { roots: [], activeRepository: a.id, ui: { rememberPrDestinations: true, prDestinations: ['main', 'release'] } };
+    const branches = vi.fn(async () => []);
+    const api = { snapshot: async () => ({ settings: saved, repositories: [a], executions: [] }), status: async () => status('main'), branches, onProgress: () => () => {}, onSnapshot: () => () => {} } as unknown as Api;
+    const c = new AppController(api); c.connect();
+    await vi.waitFor(() => expect(branches).toHaveBeenCalledWith(a.id, true));
+    expect(branches).toHaveBeenCalledWith(a.id, false);
+    expect(c.getSnapshot().prRows.map(row => row.target)).toEqual(['', '', '', '']);
+  });
+  it('lembra os "a partir de" da criação dinâmica e limpa quando pedido', () => {
+    const updateSettings = vi.fn(async () => ({ settings: { roots: [] }, repositories: [], executions: [] }));
+    const c = new AppController({ updateSettings } as unknown as Api);
+    c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] } });
+    c.setRememberBranchBases(true);
+    c.setBranchRow(0, { base: 'release' });
+    c.setBranchRow(1, { base: 'release' });
+    c.clearBranchBases();
+    expect(c.getSnapshot().branchRows.every(row => !row.base)).toBe(true);
+    expect(updateSettings).toHaveBeenLastCalledWith({ ui: { branchBases: [] } });
   });
   it('criação dinâmica começa com 4 linhas e ignora as vazias ao criar', async () => {
     const createBranches = vi.fn(async () => ({ created: ['x', 'y'], published: [], failures: [] }));

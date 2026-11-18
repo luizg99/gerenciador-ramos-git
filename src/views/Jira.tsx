@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { JiraBounds, JiraBrowserState, JiraCurrentUser, JiraFieldMeta, JiraIssue, JiraMethod, JiraTransition, JiraWorklog } from '../models/jira';
 import { greeting } from '../models/reviewMessage';
 import { RichPaste } from './RichPaste';
-import { JIRA_BASE, JIRA_FLAG_PATH, isImpeded, parseJiraKey, parsePrLinks, originalEstimateSeconds } from '../models/jira';
+import { JIRA_BASE, JIRA_FLAG_PATH, isImpeded, parseJiraKey, parsePrLinks, originalEstimateSeconds, ownEstimateSeconds } from '../models/jira';
 
 type Role = '' | 'coding' | 'support';
 type Meta = { fields?: Record<string, JiraFieldMeta> };
@@ -253,10 +253,13 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   const supportMain = !!main && isSupportMain(main);
   const expectedStatus = supportMain ? 'EM ANDAMENTO' : 'EM DESENVOLVIMENTO';
   const isInDevelopment = !!main && normalizeStatus(main.fields.status?.name) === expectedStatus;
-  const estimatedIssues = main ? [main, ...coding] : [];
+  // Só Apoio - Cliente guarda horas na principal; nas demais, a principal soma as subtarefas de codificação e não pode ter estimativa própria.
+  const estimatedIssues = main ? supportMain ? [main, ...coding] : coding : [];
+  const mainOwnEstimate = main && !supportMain ? ownEstimateSeconds(main) : 0;
   const blockers = main ? [
     ...(!isInDevelopment ? [`A tarefa principal deve estar ${expectedStatus}.`] : []),
     ...(!supportMain && !assigned.length ? ['Nenhuma subtarefa de codificação ativa encontrada.'] : []),
+    ...(mainOwnEstimate > 0 ? [`Remova a estimativa de ${main.key} (${mainOwnEstimate / 3600}h): a tarefa principal deve somar as horas das subtarefas de codificação.`] : []),
     ...estimatedIssues.filter(issue => originalEstimateSeconds(issue) <= 0 && !(Number.isFinite(Number(estimates[issue.key])) && Number(estimates[issue.key]) > 0)).map(issue => `Informe a estimativa de horas de ${issue.key}.`),
     ...(!aiText.trim() ? ['Preencha o texto da IA para o comentário.'] : []),
     ...(coding.length && !notes.trim() ? ['Preencha as Notes do Gem Dev para a descrição.'] : []),
@@ -319,6 +322,10 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     if (!finalReady) throw new Error('Preencha as informações obrigatórias, confira LogTime, responsável pelos PRs e transições.');
     if (!window.confirm(`Executar o encerramento das tarefas Jira?\n\nCodificação: ${coding.map(i => i.key).join(', ') || 'nenhuma'}\nApoio: ${support.map(i => i.key).join(', ') || 'nenhum'}\nPrincipal: ${main!.key}\n\nO fluxo pode gravar comentários, editar descrições e causa da ocorrência, criar a tarefa Code Review e fechar as tarefas.`)) return;
     setLog([]);
+    if (!supportMain) {
+      const freshMain = await request<JiraIssue>(`${issuePath(main!.key)}?fields=timeoriginalestimate,timetracking`);
+      if (ownEstimateSeconds(freshMain) > 0) throw new Error(`Remova a estimativa de horas de ${main!.key}: a tarefa principal deve somar as horas das subtarefas de codificação.`);
+    }
     const freshEstimates = await Promise.all(estimatedIssues.map(issue => request<JiraIssue>(`${issuePath(issue.key)}?fields=timeoriginalestimate,aggregatetimeoriginalestimate,timetracking`)));
     for (const issue of freshEstimates) {
       if (originalEstimateSeconds(issue) > 0) continue;
@@ -435,7 +442,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
         {!main && !impeded && !busy && <div className="jira-empty"><span aria-hidden="true">☷</span><h3>Comece pela tarefa principal</h3><p>Carregue a tarefa para consultar as subtarefas, registrar LogTimes e preparar o encerramento.</p><small>Você poderá revisar as alterações antes de confirmar o fluxo.</small></div>}
         {main && <>
           <section className="card"><div className="card-heading"><div><h2>{main.key} — {main.fields.summary}</h2><p>{main.fields.issuetype?.name} · {main.fields.status?.name} · {main.fields.assignee?.displayName ?? 'Sem responsável'}</p></div><a href={`${JIRA_BASE}/browse/${encodeURIComponent(main.key)}`} target="_blank" rel="noreferrer">Abrir tarefa ↗</a></div>
-            <section aria-label="Estimativas de horas"><h3>Estimativas de horas</h3>{estimatedIssues.map(issue => { const estimate = originalEstimateSeconds(issue); const aggregated = estimate > 0 && !issue.fields.timeoriginalestimate && !issue.fields.timetracking?.originalEstimateSeconds && issue.fields.aggregatetimeoriginalestimate != null; return <label className="jira-field jira-estimate-field" key={issue.key}><span>Estimativa original — {issue.key}{issue.key === main.key ? ' · Tarefa principal' : ''} (horas)</span><input className="jira-estimate-input" type="number" min="0.01" step="any" required aria-label={`Estimativa de horas ${issue.key}`} disabled={busy || estimate > 0} value={estimate > 0 ? estimate / 3600 : estimates[issue.key] ?? ''} onChange={e => setEstimates(current => ({ ...current, [issue.key]: e.target.value }))}/><small>{aggregated ? `Estimativa considerada pelo Jira (${estimate / 3600}h).` : estimate > 0 ? 'Já informada no Jira; não pode ser editada.' : 'Obrigatória. Será salva ao confirmar o fluxo.'}</small></label>; })}</section>
+            <section aria-label="Estimativas de horas"><h3>Estimativas de horas</h3>{mainOwnEstimate > 0 && <p className="inline-warning" role="alert">{main.key} tem estimativa própria de {mainOwnEstimate / 3600}h. Remova-a no Jira: a tarefa principal obtém as horas das subtarefas de codificação. O fluxo fica bloqueado até a remoção.</p>}{estimatedIssues.map(issue => { const estimate = originalEstimateSeconds(issue); const aggregated = estimate > 0 && !issue.fields.timeoriginalestimate && !issue.fields.timetracking?.originalEstimateSeconds && issue.fields.aggregatetimeoriginalestimate != null; return <label className="jira-field jira-estimate-field" key={issue.key}><span>Estimativa original — {issue.key}{issue.key === main.key ? ' · Tarefa principal' : ''} (horas)</span><input className="jira-estimate-input" type="number" min="0.01" step="any" required aria-label={`Estimativa de horas ${issue.key}`} disabled={busy || estimate > 0} value={estimate > 0 ? estimate / 3600 : estimates[issue.key] ?? ''} onChange={e => setEstimates(current => ({ ...current, [issue.key]: e.target.value }))}/><small>{aggregated ? `Estimativa considerada pelo Jira (${estimate / 3600}h).` : estimate > 0 ? 'Já informada no Jira; não pode ser editada.' : 'Obrigatória. Será salva ao confirmar o fluxo.'}</small></label>; })}</section>
             <div className="jira-flow-body" hidden={!isInDevelopment}>
             <div className="jira-flow-summary" aria-label="Resumo da entrega"><span><strong>{supportMain ? 'Apoio ao cliente' : `${coding.length} ${coding.length === 1 ? 'codificação' : 'codificações'}`}</strong>Tipo de entrega</span><span><strong>{Object.values(worklogs).reduce((total, entries) => total + entries.length, 0)}</strong>LogTimes carregados</span><span><strong>{finalReady ? 'Pronta para revisar' : 'Em preparação'}</strong>Situação da entrega</span></div>
             {supportMain && <>

@@ -1,7 +1,7 @@
 import type { Api, Branch, CloneSource, Commit, Execution, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode, TortoiseOptions, UiPreferences } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
-export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira';
+export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira' | 'jiraReport';
 export interface ViewModel {
   snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
   switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[];
@@ -10,15 +10,15 @@ export interface ViewModel {
   progress: Progress[];
   manualConfirmed: boolean; loadingRepository: boolean; loadingHistory: boolean;
   createBase: string; publishNew: boolean; installOnSwitch: boolean; prInfo?: PullRequestInfo; prSource: string; prTarget: string;
-  dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; rememberPrDestinations: boolean;
+  dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; rememberPrDestinations: boolean; rememberBranchBases: boolean;
   jiraIssue: string; prUrl: string; reviewMessages: ReviewMessage[]; reviewSearch: string; generatedReview?: ReviewMessage;
 }
 export interface BranchRow { name: string; base: string }
 export interface PrRow { source: string; target: string; url?: string }
 // Checks lembrados entre aberturas: ficam no settings.json (não dependem do armazenamento do navegador).
-const preferenceKeys = ['dynamicBranches', 'installOnSwitch', 'rememberPrDestinations'] as const;
+const preferenceKeys = ['dynamicBranches', 'installOnSwitch', 'rememberPrDestinations', 'rememberBranchBases'] as const;
 const emptyPrRows = (targets: string[] = []): PrRow[] => Array.from({ length: 4 }, (_, index) => ({ source: '', target: targets[index] ?? '' }));
-const emptyBranchRows = (): BranchRow[] => Array.from({ length: 4 }, () => ({ name: '', base: '' }));
+const emptyBranchRows = (bases: string[] = []): BranchRow[] => Array.from({ length: 4 }, (_, index) => ({ name: '', base: bases[index] ?? '' }));
 export class AppController {
   private hydrated = false;
   private listeners = new Set<() => void>();
@@ -30,7 +30,7 @@ export class AppController {
     switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, tortoiseOpened: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
     progress: [], manualConfirmed: false, loadingRepository: false, loadingHistory: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
-    dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false,
+    dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false, rememberBranchBases: false,
     jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: ''
   };
   constructor(private api: Api) {}
@@ -47,13 +47,16 @@ export class AppController {
     this.state = { ...this.state, snapshot: { ...snapshot, settings: { ...snapshot.settings, ui: { ...snapshot.settings.ui, ...patch } } } };
     void Promise.resolve(this.api.updateSettings?.({ ui: patch })).catch(() => {});
   }
+  saveJiraSquad = (jiraSquad: string[], jiraIgnored: string[]) => { this.savePreferences({ jiraSquad, jiraIgnored }); };
+  saveJiraPeriod = (jiraPeriod: number, jiraFrom: string, jiraTo: string) => { this.savePreferences({ jiraPeriod, jiraFrom, jiraTo }); };
   // Na primeira carga, aplica as preferências salvas.
   private hydrate(snapshot: Snapshot) {
     if (this.hydrated) return;
     this.hydrated = true;
     const ui = snapshot.settings.ui ?? {};
     const dynamicBranches = ui.dynamicBranches ?? false;
-    this.state = { ...this.state, dynamicBranches, installOnSwitch: ui.installOnSwitch ?? false, rememberPrDestinations: ui.rememberPrDestinations ?? false, switchRow: dynamicBranches ? 0 : null };
+    this.state = { ...this.state, dynamicBranches, installOnSwitch: ui.installOnSwitch ?? false, rememberPrDestinations: ui.rememberPrDestinations ?? false, rememberBranchBases: ui.rememberBranchBases ?? false, switchRow: dynamicBranches ? 0 : null };
+    if (ui.rememberBranchBases) this.state = { ...this.state, branchRows: emptyBranchRows(this.savedBranchBases()) };
   }
   get azureOrganizationUrl() { return this.state.snapshot.settings.ui?.azureOrganizationUrl ?? ''; }
   saveAzureOrganization = (value: string) => { const url = value.trim(); if (url && url !== this.azureOrganizationUrl) this.savePreferences({ azureOrganizationUrl: url }); };
@@ -119,11 +122,20 @@ export class AppController {
   private async loadInBackground() {
     const token = this.loadToken + 1;
     this.set({ loadingRepository: true });
-    try { await this.refreshData(); if (token === this.loadToken) this.prefillSource(); } catch (error) { if (token === this.loadToken) this.set({ error: (error as Error).message }); }
+    try { await this.refreshData(); if (token === this.loadToken) { this.prefillSource(); void this.fetchRemoteBranches(); } } catch (error) { if (token === this.loadToken) this.set({ error: (error as Error).message }); }
     finally { if (token === this.loadToken) this.set({ loadingRepository: false }); }
   }
   initialize = async () => { await this.loadInBackground(); if (!this.repository) this.set({ tab: 'projects' }); };
-  refresh = () => this.action(() => this.refreshData());
+  // Traz os ramos novos do remoto (git fetch --all --prune); falhas (rede/credenciais) não impedem de usar a lista local.
+  private async fetchRemoteBranches() {
+    if (!this.repository) return;
+    const id = this.id;
+    try {
+      const branches = await this.api.branches(id, true);
+      if (this.repository?.id === id) this.set({ branches });
+    } catch (error) { if (this.repository?.id === id) this.set({ error: `Não foi possível atualizar os ramos do remoto: ${(error as Error).message}` }); }
+  }
+  refresh = () => this.action(async () => { await this.refreshData(); await this.fetchRemoteBranches(); }, false, 'Atualizando ramos do remoto…');
   // "Usa pman" fica gravado em settings.json e vale para todo o aplicativo; padrão: desmarcado.
   get usePman() { return this.state.snapshot.settings.usePman ?? false; }
   get useGemini() { return this.state.snapshot.settings.useGemini ?? false; }
@@ -154,7 +166,7 @@ export class AppController {
     await this.api.selectRepository(id);
     this.prSourcesVersion++;
     this.set({ jiraIssue: '', prUrl: '', generatedReview: undefined });
-    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: emptyBranchRows(), switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), progress: [], manualConfirmed: false, tab: 'switch' });
+    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: emptyBranchRows(this.savedBranchBases()), switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
   selectTab = (tab: Tab) => { this.set({ tab }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
@@ -177,22 +189,39 @@ export class AppController {
     const result = await this.api.createBranch(this.id, name, base, this.state.switchMode, this.state.publishNew, this.installOnSwitch);
     this.set({ notice: `Pronto! Ramo ${result.branch} criado a partir de ${base}${result.published ? ' e enviado para o remoto' : ''}, selecionado${this.installOnSwitch ? ' e com dependências instaladas' : ''}.${result.stash ? ` Stash preservado: ${result.stash.slice(0, 10)}.` : ''}`, switchTarget: '', createBase: '' });
   }, true, 'Criando ramo…');
+  // Destinos lembrados valem para todo o aplicativo. Configurações antigas guardavam por projeto: aproveita a do projeto atual.
+  // Os "a partir de" lembrados valem para todo o aplicativo; se não existirem no projeto atual, a linha mostra o erro.
+  private savedBranchBases(): string[] {
+    if (!this.state.rememberBranchBases) return [];
+    const value: unknown = this.state.snapshot.settings.ui?.branchBases;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 4) : [];
+  }
+  private storeBranchBases(bases: string[]) { this.savePreferences({ branchBases: bases }); }
+  setRememberBranchBases = (enabled: boolean) => {
+    this.set({ rememberBranchBases: enabled, ...(enabled ? {} : { branchRows: this.state.branchRows.map(row => ({ ...row, base: '' })) }) });
+    this.storeBranchBases(enabled ? this.state.branchRows.map(row => row.base.trim()) : []);
+  };
+  clearBranchBases = () => {
+    this.set({ branchRows: this.state.branchRows.map(row => ({ ...row, base: '' })) });
+    this.storeBranchBases([]);
+  };
   private savedPrDestinations(id: string): string[] {
     if (!this.state.rememberPrDestinations) return [];
-    const value = this.state.snapshot.settings.ui?.prDestinations?.[id];
-    return Array.isArray(value) ? value.slice(0, 4) : [];
+    const value: unknown = this.state.snapshot.settings.ui?.prDestinations;
+    const list = Array.isArray(value) ? value : value && typeof value === 'object' ? (value as Record<string, unknown>)[id] : [];
+    return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string').slice(0, 4) : [];
   }
-  private storePrDestinations(id: string, destinations: string[]) {
-    this.savePreferences({ prDestinations: { ...this.state.snapshot.settings.ui?.prDestinations, [id]: destinations } });
+  private storePrDestinations(destinations: string[]) {
+    this.savePreferences({ prDestinations: destinations });
   }
   setRememberPrDestinations = (enabled: boolean) => {
     this.set({ rememberPrDestinations: enabled, ...(enabled ? {} : { prTarget: '', prRows: this.state.prRows.map(row => ({ ...row, target: '', url: undefined })) }) });
-    if (!enabled) this.storePrDestinations(this.id, []);
+    if (!enabled) this.storePrDestinations([]);
   };
   clearPrSources = () => { this.prSourcesVersion++; this.set({ prSource: '', prRows: this.state.prRows.map(row => ({ ...row, source: '', url: undefined })) }); };
   clearPrTargets = () => {
     this.set({ prTarget: '', prRows: this.state.prRows.map(row => ({ ...row, target: '', url: undefined })) });
-    this.storePrDestinations(this.id, []);
+    this.storePrDestinations([]);
   };
   // Pull request: quatro pares disponíveis, com destinos lembrados somente quando solicitado.
   private async loadPullRequest() {
@@ -238,7 +267,9 @@ export class AppController {
     if (result.published.length) parts.push(`Enviados para o remoto: ${result.published.join(', ')}.`);
     if (result.branch) parts.push(`Ramo atual: ${result.branch}${this.installOnSwitch ? ', dependências instaladas' : ''}.`);
     if (result.stash) parts.push(`Stash preservado: ${result.stash.slice(0, 10)}.`);
-    this.set({ notice: parts.join(' '), branchRows: emptyBranchRows(), switchRow: this.state.dynamicBranches ? 0 : null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
+    const bases = this.state.rememberBranchBases ? this.state.branchRows.map(row => row.base.trim()) : [];
+    if (this.state.rememberBranchBases) this.storeBranchBases(bases);
+    this.set({ notice: parts.join(' '), branchRows: emptyBranchRows(bases), switchRow: this.state.dynamicBranches ? 0 : null, ...(result.failures.length ? { error: `Falha ao enviar para o remoto:\n${result.failures.join('\n')}` } : {}) });
   }, true, 'Criando ramos…');
   // PR dinâmico: até 4 pares origem → destino, abertos de uma vez.
   setPrRow = (index: number, patch: Partial<PrRow>) => { if ('source' in patch) this.prSourcesVersion++; this.set({ prRows: this.state.prRows.map((row, i) => i === index ? { ...row, ...patch, url: undefined } : row) }); };
@@ -306,7 +337,7 @@ export class AppController {
     else this.set({ prUrl: urlFor(pairs[0]) ?? '' });
     if (!result.error) {
       const destinations = this.state.rememberPrDestinations ? pairs.map(row => row.target.trim()) : [];
-      if (this.state.rememberPrDestinations) this.storePrDestinations(this.id, destinations);
+      if (this.state.rememberPrDestinations) this.storePrDestinations(destinations);
       this.prSourcesVersion++;
       this.set({ jiraIssue: '', prSource: '', prTarget: destinations[0] ?? '', prUrl: '', prRows: emptyPrRows(destinations) });
     }
