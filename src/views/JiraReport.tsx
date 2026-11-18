@@ -1,7 +1,7 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import type { JiraCurrentUser } from '../models/jira';
 import { JIRA_BASE } from '../models/jira';
-import { REPORT_FIELDS, REPORT_MAX_ISSUES, REPORT_PAGE_SIZE, REPORT_PARENT_CHUNK, SPRINT_WINDOW_DAYS, buildReportJql, issueRoutines, issueSprints, matchesRoutine, normalizeText, previousRange, summarizeByPerson, summarizeBySprint, summarizeOverTime, taskKind, TASK_KIND_LABELS, toReportRows, totalsOf, variation, weekdayLabel, type PersonSummary, type ReportIssue, type ReportRow, type ReportTotals, type IssueExtras, type TaskKind, type SprintMetric, type SprintSummary, type TimeSeries } from '../models/jiraReport';
+import { REPORT_FIELDS, REPORT_MAX_ISSUES, REPORT_PAGE_SIZE, REPORT_PARENT_CHUNK, SPRINT_WINDOW_DAYS, buildReportJql, isSprintField, issueRoutines, issueSprints, matchesRoutine, normalizeText, previousRange, summarizeByPerson, summarizeBySprint, summarizeOverTime, taskKind, TASK_KIND_LABELS, toReportRows, totalsOf, variation, weekdayLabel, type PersonSummary, type ReportIssue, type ReportRow, type ReportTotals, type IssueExtras, type TaskKind, type SprintMetric, type SprintSummary, type TimeSeries } from '../models/jiraReport';
 
 const SQUAD_KEY = 'jira-report-squad';
 const IGNORED_KEY = 'jira-report-ignored';
@@ -128,7 +128,7 @@ export const JiraReport = memo(function JiraReport({ initialSquad, initialIgnore
       const list = Array.isArray(fields) ? fields : [];
       customFields.current = {
         routine: list.filter(field => /rotina/i.test(field.name)).map(field => field.id),
-        sprint: list.filter(field => /^sprint$/i.test(field.name.trim()) || /gh-sprint/i.test(field.schema?.custom ?? '')).map(field => field.id)
+        sprint: list.filter(isSprintField).map(field => field.id)
       };
     } catch { return { routine: [], sprint: [] }; }
     return customFields.current;

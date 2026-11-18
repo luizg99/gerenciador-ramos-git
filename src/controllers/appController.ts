@@ -104,7 +104,7 @@ export class AppController {
   private async action(work: () => Promise<void>, refresh = false, busyMessage = 'Carregando...') {
     if (this.state.busy) return;
     this.set({ busy: true, busyMessage, error: '', notice: '' });
-    try { await work(); } catch (error) { this.set({ error: (error as Error).message }); }
+    try { await this.remoteFetch; await work(); } catch (error) { this.set({ error: (error as Error).message }); }
     finally {
       if (refresh) try { await this.refreshData(); } catch (error) { this.set({ error: [this.state.error, (error as Error).message].filter(Boolean).join('\n') }); }
       this.set({ busy: false, busyMessage: '' });
@@ -128,7 +128,14 @@ export class AppController {
   // Com "Usa Jira" ligado o app abre no Início (quadro de tarefas); sem ele, abre na tela de ramos ou, sem projeto, em Projetos.
   initialize = async () => { await this.loadInBackground(); if (this.useJira) this.set({ tab: 'home' }); else if (!this.repository) this.set({ tab: 'projects' }); };
   // Traz os ramos novos do remoto (git fetch --all --prune); falhas (rede/credenciais) não impedem de usar a lista local.
-  private async fetchRemoteBranches() {
+  // Ações do usuário esperam esse fetch terminar: no processo principal só uma operação roda por vez, e sem isso falhariam com "operação em andamento".
+  private remoteFetch?: Promise<void>;
+  private fetchRemoteBranches() {
+    const run = this.loadRemoteBranches().finally(() => { if (this.remoteFetch === run) this.remoteFetch = undefined; });
+    this.remoteFetch = run;
+    return run;
+  }
+  private async loadRemoteBranches() {
     if (!this.repository) return;
     const id = this.id;
     try {
@@ -181,6 +188,12 @@ export class AppController {
     const branch = this.state.status?.upstream?.split('/').slice(1).join('/') || this.state.status?.branch;
     this.set({ branches: await this.api.fetchCurrentBranch(this.id), notice: `Ramo ${branch} consultado no remoto.` });
   }, true);
+  // Seletor "Ramo atual" da barra superior. Com o diretório limpo troca direto; com alterações locais (ou operação Git em andamento)
+  // leva à tela de troca com o ramo já preenchido, onde o usuário decide o que fazer com elas.
+  quickSwitch = (name: string) => { this.set({ switchTarget: name }); return this.switchBranch(); };
+  prepareSwitch = (name: string) => this.set({ switchTarget: name, tab: 'switch', error: '', notice: '' });
+  // Ramo que não existe: abre a tela de criação (sem "criação dinâmica") com o nome que o usuário já havia digitado.
+  startCreateBranch = (name: string) => this.set({ switchTarget: name, createBase: '', switchRow: null, dynamicBranches: false, tab: 'switch', error: '', notice: '' });
   switchBranch = () => this.action(async () => {
     const result = await this.api.switchBranch(this.id, this.state.switchTarget, this.state.switchMode, this.installOnSwitch);
     this.set({ notice: `Pronto! Ramo ${result.branch} selecionado${this.installOnSwitch ? ' e dependências instaladas' : ''}.${result.stash ? ` Stash preservado: ${result.stash.slice(0, 10)}.` : ''}`, switchTarget: '' });

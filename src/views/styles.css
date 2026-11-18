@@ -150,7 +150,7 @@ main{min-width:0;min-height:0;height:100vh;display:flex;flex-direction:column}
 .loading-hint{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);white-space:nowrap}
 .loading-hint .spinner{width:12px;height:12px}
 .branch-badge{display:inline-flex;align-items:center;gap:2px;background:var(--accent-soft);color:var(--selected);border-radius:5px;padding:2px 2px 2px 9px;font-size:12px;font-family:Consolas,monospace;max-width:420px;min-width:0}
-.branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:default}
+.branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text;-webkit-user-select:text;cursor:text}
 .copy-branch{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;background:none;color:inherit;border-radius:4px;opacity:.75;flex-shrink:0}
 .copy-branch:hover:not(:disabled){opacity:1;background:var(--panel-2)}
 .quiet{border-color:transparent;background:none;color:var(--muted);font-size:12px;padding:6px 10px}
@@ -1016,3 +1016,35 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .kanban-columns{height:var(--kanban-height,60vh);overflow-x:auto;overflow-y:hidden;align-items:stretch;grid-template-rows:minmax(0,1fr);padding-bottom:10px}
 .kanban-column{display:flex;flex-direction:column;min-height:0}
 .kanban-cards{overflow-y:auto;min-height:0;flex:1;align-content:start;padding-right:2px}
+.kanban-warning{font-size:12px;font-weight:500;color:var(--amber);padding:4px 12px;border-radius:980px;background:var(--warning-bg);cursor:help}
+
+/* Seletor "Ramo atual" */
+.branch-switcher{position:relative;min-width:0}
+.branch-badge{max-width:460px;gap:4px}
+.branch-badge .lead{font-family:inherit;color:var(--muted);font-size:12px;font-weight:500;margin-right:4px;flex-shrink:0;user-select:none}
+.branch-name{min-width:0}
+.branch-toggle{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border-radius:50%;background:none;color:var(--muted);font-size:11px;flex-shrink:0}
+.branch-toggle:hover:not(:disabled){background:var(--hover);color:var(--text)}
+.branch-badge:has(.branch-toggle[aria-expanded=true]){box-shadow:0 0 0 2px var(--primary)}
+.branch-menu{left:0;transform:none;width:400px}
+.branch-hint{margin:0 0 8px;padding:8px 10px;border-radius:10px;background:var(--warning-bg);color:var(--amber);font-size:12px;line-height:1.45}
+.branch-missing{margin-top:8px;padding:12px;border-radius:14px;background:var(--accent-soft);display:grid;gap:8px;justify-items:start}
+.branch-missing p{margin:0;font-size:13px;overflow-wrap:anywhere}
+
+/* Configurações: Explicação técnica */
+.tech-setting{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.tech-setting .hint{margin-top:6px}
+.tech-dialog{width:min(780px,calc(100vw - 48px));max-height:calc(100vh - 64px);padding:0;background:var(--panel);color:var(--text);border:0;border-radius:22px;box-shadow:0 30px 90px rgba(0,0,0,.4)}
+.tech-dialog[open]{display:flex;flex-direction:column}
+.tech-dialog::backdrop{background:rgba(0,0,0,.42);backdrop-filter:blur(10px)}
+.tech-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:22px 28px 14px;border-bottom:1px solid var(--line)}
+.tech-heading h2{margin:0;font-size:20px}
+.tech-heading p{margin:4px 0 0;font-size:13px;color:var(--muted)}
+.tech-body{overflow:auto;padding:8px 28px 26px}
+.tech-body section{padding:16px 0;border-bottom:1px solid var(--line)}
+.tech-body section:last-child{border-bottom:0}
+.tech-body h3{margin:0 0 6px;font-size:14px;font-weight:650;color:var(--accent)}
+.tech-body p{margin:0;font-size:13px;line-height:1.6;color:var(--secondary-text)}
+.tech-body .tech-intro{padding:14px 0 4px;color:var(--text)}
+@media(max-width:900px){.tech-setting{align-items:flex-start;flex-direction:column}}
+.branch-badge .lead{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}

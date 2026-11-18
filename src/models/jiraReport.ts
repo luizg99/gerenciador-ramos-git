@@ -71,11 +71,25 @@ export function issueRoutines(fields: ReportIssue['fields'], fieldIds: string[])
   return fromFields.length ? [...new Set(fromFields)] : routineValues(fields.components);
 }
 // O campo Sprint vem como texto legado ("...Sprint@1[id=1,state=CLOSED,name=Vendas - 2026.11/2,startDate=...]") ou como objeto, dependendo da versão do Jira.
+// O campo Sprint é achado pelo tipo (gh-sprint) ou pelo nome "Sprint"; os ids mudam de um Jira para outro.
+export const isSprintField = (field: { name: string; schema?: { custom?: string } }): boolean =>
+  /sprint/i.test(field.schema?.custom ?? '') || /^\s*sprints?\s*$/i.test(field.name);
+const looksLikeSprint = (value: unknown): boolean => (Array.isArray(value) ? value : [value]).some(item => {
+  if (typeof item === 'string') return /Sprint@|greenhopper[^\[]*\[[^\]]*name=/i.test(item);
+  const sprint = item as { name?: unknown } | null;
+  return !!sprint && typeof sprint === 'object' && typeof sprint.name === 'string' && ('boardId' in sprint || 'originBoardId' in sprint || 'state' in sprint || 'startDate' in sprint);
+});
+// Plano B quando o nome do campo não ajuda (nome traduzido, permissões): acha os campos pelo formato dos valores nas tarefas.
+export function detectSprintFieldIds(issues: { fields: Record<string, unknown> }[]): string[] {
+  const ids = new Set<string>();
+  for (const issue of issues) for (const [id, value] of Object.entries(issue.fields)) if (id.startsWith('customfield_') && looksLikeSprint(value)) ids.add(id);
+  return [...ids];
+}
 export function sprintValues(raw: unknown): SprintRef[] {
   const items = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   const refs = items.flatMap((item): SprintRef[] => {
     if (typeof item === 'string') {
-      const name = /(?:^|[,\[])name=([^,\]]+)/.exec(item)?.[1]?.trim();
+      const name = /(?:^|[,\[])name=([^\]]*?)(?=,(?:startDate|endDate|completeDate|activatedDate|sequence|goal|autoStartStop|synced)=|\])/.exec(item)?.[1]?.trim();
       const time = (field: string) => { const value = Date.parse(new RegExp(`${field}=([^,\\]]+)`).exec(item)?.[1] ?? ''); return Number.isNaN(value) ? 0 : value; };
       return name ? [{ name, start: time('startDate'), end: time('endDate') }] : [];
     }

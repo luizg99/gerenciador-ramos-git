@@ -158,4 +158,15 @@ describe('AppController', () => {
     c.removeBranchRow(1); expect(c.getSnapshot().switchRow).toBe(0);
     c.toggleSwitchRow(0); expect(c.getSnapshot().switchRow).toBeNull();
   });
+
+  it('ramo atual no topo: com alterações leva à tela de troca; ramo novo abre a criação sem criação dinâmica e com o nome digitado', () => {
+    const updateSettings = vi.fn(async () => ({ settings: { roots: [] }, repositories: [], executions: [] }));
+    const c = new AppController({ updateSettings } as unknown as Api);
+    c.set({ snapshot: { settings: { roots: [], activeRepository: a.id }, repositories: [a], executions: [] }, tab: 'home', dynamicBranches: true, createBase: 'main', switchRow: 1 });
+    c.prepareSwitch('release');
+    expect(c.getSnapshot()).toMatchObject({ tab: 'switch', switchTarget: 'release' });
+    c.startCreateBranch('feature/nova');
+    expect(c.getSnapshot()).toMatchObject({ tab: 'switch', switchTarget: 'feature/nova', dynamicBranches: false, createBase: '', switchRow: null });
+    expect(updateSettings).toHaveBeenLastCalledWith({ ui: { dynamicBranches: false } });
+  });
 });

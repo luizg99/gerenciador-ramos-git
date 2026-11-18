@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReportJql, previousRange, routineValues, sprintOfResolution, sprintValues, summarizeBySprint, matchesRoutine, summarizeByPerson, summarizeOverTime, toReportRows, variation, weekStart } from '../src/models/jiraReport';
+import { buildReportJql, detectSprintFieldIds, isSprintField, previousRange, routineValues, sprintOfResolution, sprintValues, summarizeBySprint, matchesRoutine, summarizeByPerson, summarizeOverTime, toReportRows, variation, weekStart } from '../src/models/jiraReport';
 
 const issue = (key: string, person: string, type: string, status: string, resolved: string, spent = 3600) =>
   ({ key, fields: { issuetype: { name: type }, status: { name: status }, assignee: { displayName: person }, resolutiondate: resolved, timespent: spent } });
@@ -62,5 +62,25 @@ describe('relatório do Jira', () => {
     expect(sprintOfResolution([s1, s2], new Date(s2.start + day)).map(item => item.name)).toEqual(['S2']);
     expect(sprintOfResolution([s1, s2], new Date(s2.end + 5 * day)).map(item => item.name)).toEqual(['S2']);
     expect(sprintOfResolution([{ name: 'X', start: 0, end: 0 }], new Date()).map(item => item.name)).toEqual(['X']);
+  });
+
+  it('reconhece o campo Sprint pelo tipo ou pelo nome', () => {
+    expect(isSprintField({ name: 'Sprint', schema: { custom: 'com.pyxis.greenhopper.jira:gh-sprint' } })).toBe(true);
+    expect(isSprintField({ name: 'Iteração', schema: { custom: 'com.pyxis.greenhopper.jira:gh-sprint' } })).toBe(true); // nome traduzido, tipo certo
+    expect(isSprintField({ name: ' Sprint ' })).toBe(true); // sem schema
+    expect(isSprintField({ name: 'Sprints' })).toBe(true);
+    expect(isSprintField({ name: 'Sprint Goal' })).toBe(false);
+    expect(isSprintField({ name: 'Rotina' })).toBe(false);
+  });
+  it('plano B: acha o campo Sprint pelo formato dos valores, nos dois formatos do Jira', () => {
+    const legacy = ['com.atlassian.greenhopper.service.sprint.Sprint@6b1f[id=12,rapidViewId=3,state=ACTIVE,name=Vendas - 2026.11/2,startDate=2026-11-09T10:00:00.000-03:00,endDate=2026-11-23T10:00:00.000-03:00]'];
+    expect(detectSprintFieldIds([{ fields: { summary: 'x', customfield_10005: legacy, customfield_10006: 'texto livre', customfield_10007: null } }])).toEqual(['customfield_10005']);
+    expect(detectSprintFieldIds([{ fields: { customfield_10020: [{ id: 5, name: 'Sprint 5', state: 'active', boardId: 2 }], customfield_10021: [{ name: 'Rotina 354' }], status: { name: 'Open' } } }])).toEqual(['customfield_10020']);
+    expect(detectSprintFieldIds([{ fields: { customfield_1: [] } }, { fields: {} }])).toEqual([]);
+  });
+  it('lê o nome da sprint mesmo com vírgula ou sem datas', () => {
+    expect(sprintValues(['x.Sprint@1[id=1,state=ACTIVE,name=Vendas, equipe A - 2026.11/2,startDate=2026-11-09T00:00:00.000Z,endDate=2026-11-23T00:00:00.000Z,sequence=1]'])[0].name).toBe('Vendas, equipe A - 2026.11/2');
+    expect(sprintValues(['x.Sprint@1[id=1,state=FUTURE,name=Sprint nova]'])[0].name).toBe('Sprint nova');
+    expect(sprintValues(['x.Sprint@1[name=Vendas - 2026.11/1,startDate=<null>,goal=meta]'])[0]).toMatchObject({ name: 'Vendas - 2026.11/1', start: 0 });
   });
 });

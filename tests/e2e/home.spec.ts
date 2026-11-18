@@ -214,3 +214,49 @@ test('Início: muda o status pelo menu "Mover para" e arrastando o cartão (com 
   await expect(page.getByRole('heading', { name: 'Mover DDV-300?' })).toBeHidden();
   expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste', 'DDV-300:Em desenvolvimento']);
 });
+
+for (const mode of ['formato' as const, 'sem-sprint' as const]) {
+  test(`Início: sprint quando /field não ajuda (${mode === 'formato' ? 'acha pelo formato dos valores' : 'sem campo Sprint: avisa'})`, async () => {
+    const data = await tempDirectory(`home-sprint-${mode}-`);
+    await mkdir(data, { recursive: true }); await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [], useJira: true }));
+    app = await electron.launch({ args: [path.resolve('.')], env: { ...env(), RAMOS_TEST_DATA: data } });
+    await app.evaluate(async ({ session }, testMode) => {
+      const status = (name: string, key: string) => ({ name, statusCategory: { key } });
+      const legacy = ['com.atlassian.greenhopper.service.sprint.Sprint@6b1f[id=12,rapidViewId=3,state=ACTIVE,name=Vendas - 2026.11/2,startDate=2026-11-09T10:00:00.000-03:00,endDate=2026-11-23T10:00:00.000-03:00]'];
+      const all = [
+        { key: 'DDV-1', fields: { summary: 'Com sprint', issuetype: { name: 'Task' }, status: status('Em desenvolvimento', 'indeterminate'), customfield_10005: testMode === 'formato' ? legacy : null } },
+        { key: 'DDV-2', fields: { summary: 'Outra', issuetype: { name: 'Task' }, status: status('Aberto', 'new'), customfield_10005: testMode === 'formato' ? legacy : null } }
+      ];
+      (globalThis as any).searchFields = [];
+      await session.fromPartition('persist:team-jira').protocol.handle('https', async request => {
+        const url = new URL(request.url);
+        if (url.pathname.endsWith('/myself')) return Response.json({ displayName: 'Luiz Ramos', name: 'luiz.ramos' });
+        // O campo Sprint não aparece em /field (nome traduzido ou sem permissão): só o plano B pelo formato dos valores pode achá-lo.
+        if (url.pathname === '/rest/api/2/field') return Response.json([{ id: 'summary', name: 'Resumo' }, { id: 'customfield_10005', name: 'Iteração' }]);
+        if (url.pathname === '/rest/api/2/search') {
+          const body = await request.json(); (globalThis as any).searchFields.push(body.fields);
+          const wanted: string[] = body.fields;
+          const issues = all.map(item => ({ key: item.key, fields: Object.fromEntries(Object.entries(item.fields).filter(([name]) => wanted.includes('*all') || wanted.includes(name) || !name.startsWith('customfield_'))) }));
+          return Response.json({ issues, total: issues.length });
+        }
+        if (url.pathname.startsWith('/rest/api/2/')) return Response.json({});
+        return new Response('<!doctype html><html><body><h1>Jira de teste</h1></body></html>', { headers: { 'content-type': 'text/html' } });
+      });
+    }, mode);
+    const page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Jira', exact: true }).click();
+    await page.getByRole('button', { name: 'Abrir Jira' }).click();
+    await page.waitForTimeout(1500);
+    await page.getByRole('button', { name: 'Início', exact: true }).click();
+    await expect(page.getByLabel('Coluna A fazer')).toContainText('DDV-2');
+    if (mode === 'formato') {
+      await expect(page.locator('.kanban-card', { hasText: 'DDV-1' }).first()).toContainText('Vendas - 2026.11/2');
+      await expect(page.getByLabel('Filtrar por sprint')).toHaveValue('Vendas - 2026.11/2');
+      await expect(page.getByText('Campo Sprint não encontrado')).toHaveCount(0);
+      expect((await app.evaluate(() => (globalThis as any).searchFields as string[][])).some(fields => fields.includes('*all'))).toBe(true);
+    } else {
+      await expect(page.locator('.kanban-card', { hasText: 'DDV-1' }).first()).toContainText('Sem sprint');
+      await expect(page.getByText('Campo Sprint não encontrado')).toBeVisible();
+    }
+  });
+}

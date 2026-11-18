@@ -34,6 +34,7 @@ export function Home({ c }: { c: AppController }) {
   const enabled = c.useJira;
   const [columns, setColumns] = useState<HomeColumn[] | null>(cachedBoard()?.columns ?? null);
   const [user, setUser] = useState(cachedBoard()?.user ?? '');
+  const [noSprintField, setNoSprintField] = useState(cachedBoard() ? cachedBoard()!.sprintFields.length === 0 : false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sprint, setSprint] = useState<string | null>(chosenSprint);
@@ -109,7 +110,7 @@ export function Home({ c }: { c: AppController }) {
     try {
       const board = await fetchMyBoard();
       if (token !== run.current) return;
-      setColumns(board.columns); setUser(board.user);
+      setColumns(board.columns); setUser(board.user); setNoSprintField(board.sprintFields.length === 0);
     } catch (cause) { if (token === run.current) { failed.current = true; setError((cause as Error).message); } }
     finally { if (token === run.current) setLoading(false); }
   };
@@ -129,9 +130,10 @@ export function Home({ c }: { c: AppController }) {
     <div className="kanban-bar">
       <p>{shown ? <><strong>{total}</strong> {total === 1 ? 'tarefa atribuída' : 'tarefas atribuídas'}{user ? <> a <strong>{user}</strong></> : ' a você'}</> : loading ? 'Carregando suas tarefas…' : ''}</p>
       <div className="kanban-tools">
+        {noSprintField && <span className="kanban-warning" title="O Jira desta conta não informou um campo Sprint (nem pelo nome, nem pelo formato dos valores). Se as tarefas têm sprint no Jira, use ↻ Atualizar ou avise quem mantém o app.">⚠ Campo Sprint não encontrado</span>}
         {copied && <span className="kanban-copied" role="status">✓ {copied}</span>}
         {columns && (options.length > 0 || withoutSprint) && <label className="kanban-filter"><span>Sprint</span><select aria-label="Filtrar por sprint" value={effective} onChange={e => choose(e.target.value)}><option value="">Todas as sprints</option>{options.map(option => <option key={option.name} value={option.name}>{option.name}</option>)}{withoutSprint && <option value={NO_SPRINT}>Sem sprint</option>}</select></label>}
-        <button className="quiet" disabled={loading} onClick={() => void load()}>{loading ? 'Atualizando…' : '↻ Atualizar'}</button>
+        <button className="quiet" disabled={loading} onClick={() => void load()}>{loading ? 'Atualizando…' : '↻ Atualizar tarefas'}</button>
       </div>
     </div>
     {moveError && <div className="alert error" role="alert"><strong>Status não alterado</strong><p>{moveError}</p><button onClick={() => setMoveError('')}>Fechar</button></div>}
