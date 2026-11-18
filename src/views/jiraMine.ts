@@ -1,3 +1,4 @@
+import type { JiraMove } from '../models/jiraHome';
 import { HOME_FIELDS, HOME_JQL, HOME_MAX_ISSUES, HOME_PAGE_SIZE, buildHomeBoard, type HomeColumn, type HomeIssue } from '../models/jiraHome';
 import { issueSprints } from '../models/jiraReport';
 
@@ -26,4 +27,13 @@ export async function fetchMyBoard(): Promise<MyBoard> {
   }
   cache = { columns: buildHomeBoard(issues, issue => issueSprints(issue.fields as Parameters<typeof issueSprints>[0], ids)), user: await me, at: Date.now() };
   return cache;
+}
+
+// Mudança de status no Jira: lista as transições permitidas para a tarefa e executa a escolhida.
+export async function fetchMoves(key: string): Promise<JiraMove[]> {
+  const result = await window.gitManager.jiraRequest(`/rest/api/2/issue/${encodeURIComponent(key)}/transitions`) as { transitions?: JiraMove[] } | null;
+  return Array.isArray(result?.transitions) ? result.transitions : [];
+}
+export async function moveIssue(key: string, transitionId: string): Promise<void> {
+  await window.gitManager.jiraRequest(`/rest/api/2/issue/${encodeURIComponent(key)}/transitions`, 'POST', { transition: { id: transitionId } });
 }

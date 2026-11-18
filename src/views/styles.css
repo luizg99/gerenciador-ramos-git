@@ -991,3 +991,10 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .jira-mine-meta em{font-style:normal;font-size:11px;padding:1px 8px;border-radius:980px;background:var(--panel-2);color:var(--secondary)}
 .kanban-copied{font-size:12px;font-weight:500;color:var(--green);padding:4px 12px;border-radius:980px;background:var(--success-bg)}
 .kanban-card{cursor:default}
+.kanban-card{cursor:grab}
+.kanban-card.dragging{opacity:.4}
+.kanban-column.drop{box-shadow:0 0 0 2px var(--primary);background:var(--accent-soft)}
+.file-context-menu hr{border:0;border-top:1px solid var(--line);margin:6px 4px}
+.menu-label{display:block;padding:4px 10px 2px;font-size:11px;font-weight:600;color:var(--subtle)}
+.menu-note{display:block;padding:6px 10px;font-size:12px;color:var(--muted);max-width:260px;overflow-wrap:anywhere}
+.file-context-menu small{color:var(--subtle)}

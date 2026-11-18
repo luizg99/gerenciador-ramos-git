@@ -96,3 +96,14 @@ export const hasWithoutSprint = (columns: HomeColumn[]): boolean => {
   const visit = (card: HomeCard): boolean => (card.mine && !card.sprint) || card.children.some(visit);
   return columns.some(column => column.cards.some(visit));
 };
+
+// Mover status: a transição é escolhida pelo nome do status de destino (ou, sem destino informado, pelo nome da própria transição).
+export interface JiraMove { id: string; name: string; to?: { name: string } }
+export const moveTarget = (move: JiraMove) => move.to?.name ?? move.name;
+export const sameStatus = (a: string, b: string) => a.trim().toLocaleLowerCase('pt-BR') === b.trim().toLocaleLowerCase('pt-BR');
+export const findMove = (moves: JiraMove[], status: string): JiraMove | undefined => moves.find(move => sameStatus(moveTarget(move), status));
+export function findCard(columns: HomeColumn[], key: string): HomeCard | undefined {
+  const search = (card: HomeCard): HomeCard | undefined => card.key === key ? card : card.children.map(search).find(Boolean);
+  for (const column of columns) for (const card of column.cards) { const found = search(card); if (found) return found; }
+  return undefined;
+}

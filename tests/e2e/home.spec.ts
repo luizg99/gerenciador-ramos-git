@@ -138,3 +138,75 @@ test('Jira: o filtro "Minhas tarefas" lista as tarefas do usuário, filtra pelo 
   await expect.poll(async () => (await app!.evaluate(() => (globalThis as any).jiraPaths as string[])).includes('/rest/api/2/issue/DDV-300')).toBe(true);
   await expect(rows).toHaveCount(0); // o painel fecha ao escolher
 });
+
+test('Início: muda o status pelo menu "Mover para" e arrastando o cartão (com confirmação), respeitando as transições do Jira', async () => {
+  const data = await tempDirectory('home-move-');
+  await mkdir(data, { recursive: true }); await writeFile(path.join(data, 'settings.json'), JSON.stringify({ roots: [], useJira: true }));
+  app = await electron.launch({ args: [path.resolve('.')], env: { ...env(), RAMOS_TEST_DATA: data } });
+  await app.evaluate(async ({ session }) => {
+    const status = (name: string, key: string) => ({ name, statusCategory: { key } });
+    const issues = [
+      { key: 'DDV-101', fields: { summary: 'Entrega principal', issuetype: { name: 'Task' }, status: status('Em desenvolvimento', 'indeterminate') } },
+      { key: 'DDV-400', fields: { summary: 'Outra em desenvolvimento', issuetype: { name: 'Task' }, status: status('Em desenvolvimento', 'indeterminate') } },
+      { key: 'DDV-300', fields: { summary: 'Corrigir validação do pedido', issuetype: { name: 'Bug' }, status: status('Aberto', 'new') } }
+    ];
+    const transitions: Record<string, { id: string; name: string; to: { name: string } }[]> = {
+      'DDV-101': [{ id: '11', name: 'Enviar para teste', to: { name: 'Em teste' } }, { id: '12', name: 'Voltar', to: { name: 'Aberto' } }, { id: '13', name: 'Manter', to: { name: 'Em desenvolvimento' } }],
+      'DDV-300': [{ id: '21', name: 'Iniciar', to: { name: 'Em desenvolvimento' } }],
+      'DDV-400': [{ id: '31', name: 'Enviar para teste', to: { name: 'Em teste' } }]
+    };
+    (globalThis as any).moveCalls = [];
+    await session.fromPartition('persist:team-jira').protocol.handle('https', async request => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/myself')) return Response.json({ displayName: 'Luiz Ramos', name: 'luiz.ramos' });
+      if (url.pathname === '/rest/api/2/search') return Response.json({ issues, total: issues.length });
+      const match = url.pathname.match(/^\/rest\/api\/2\/issue\/([^/]+)\/transitions$/);
+      if (match) {
+        const list = transitions[match[1]] ?? [];
+        if (request.method === 'POST') {
+          const id = (await request.json()).transition.id; const chosen = list.find(item => item.id === id)!;
+          (globalThis as any).moveCalls.push(`${match[1]}:${chosen.to.name}`);
+          issues.find(item => item.key === match[1])!.fields.status = status(chosen.to.name, 'indeterminate');
+          return new Response(null, { status: 204 });
+        }
+        return Response.json({ transitions: list });
+      }
+      if (url.pathname.startsWith('/rest/api/2/')) return Response.json({});
+      return new Response('<!doctype html><html><body><h1>Jira de teste</h1></body></html>', { headers: { 'content-type': 'text/html' } });
+    });
+  });
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'Jira', exact: true }).click();
+  await page.getByRole('button', { name: 'Abrir Jira' }).click();
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Início', exact: true }).click();
+  await expect(page.locator('.kanban-card', { hasText: 'DDV-101' })).toHaveCount(1);
+
+  // Menu "Mover para": só os destinos permitidos, sem o status atual.
+  await page.locator('.kanban-card', { hasText: 'DDV-101' }).locator('.kanban-summary').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Mover para Em teste' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Mover para Aberto' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Mover para Em desenvolvimento' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Mover para Em teste' }).click();
+  await expect(page.getByText('DDV-101 movida para Em teste')).toBeVisible();
+  await expect(page.getByLabel('Coluna Em teste').locator('.kanban-card', { hasText: 'DDV-101' })).toHaveCount(1);
+  expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste']);
+
+  // Arrastar para outra coluna: pede confirmação e só então move; cancelar não muda nada.
+  const card = page.locator('.kanban-card', { hasText: 'DDV-300' });
+  await card.dragTo(page.getByLabel('Coluna Em desenvolvimento'));
+  await expect(page.getByRole('heading', { name: 'Mover DDV-300?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancelar' }).click();
+  expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste']);
+  await card.dragTo(page.getByLabel('Coluna Em desenvolvimento'));
+  await page.getByRole('button', { name: 'Mover', exact: true }).click();
+  await expect(page.getByLabel('Coluna Em desenvolvimento').locator('.kanban-card', { hasText: 'DDV-300' })).toHaveCount(1);
+  expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste', 'DDV-300:Em desenvolvimento']);
+
+  // Destino sem transição no fluxo: avisa, mostra os destinos possíveis e não chama o Jira.
+  await page.locator('.kanban-card', { hasText: 'DDV-300' }).dragTo(page.getByLabel('Coluna Em teste'));
+  await expect(page.getByRole('alert')).toContainText('Não há transição de “Em desenvolvimento” para “Em teste” em DDV-300');
+  await expect(page.getByRole('alert')).toContainText('Destinos possíveis: Em desenvolvimento');
+  await expect(page.getByRole('heading', { name: 'Mover DDV-300?' })).toBeHidden();
+  expect(await app.evaluate(() => (globalThis as any).moveCalls)).toEqual(['DDV-101:Em teste', 'DDV-300:Em desenvolvimento']);
+});
