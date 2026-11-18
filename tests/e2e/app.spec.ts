@@ -42,11 +42,20 @@ test('Electron: projetos, consulta Git real, histórico, validações e fronteir
   await page.keyboard.press('Escape'); await expect(page.getByLabel('Buscar projeto')).toBeHidden();
   await expect(page.getByRole('radio')).toHaveCount(3);
   await page.getByLabel('Ramo', { exact: true }).fill('feature/nova-tela');
-  await expect(page.getByRole('button', { name: 'Criar ramo e trocar →' })).toBeVisible(); await expect(page.getByLabel('A partir de')).toHaveValue(f.source);
+  await expect(page.getByRole('button', { name: 'Criar ramo e trocar →' })).toBeVisible(); await expect(page.getByLabel('A partir de')).toHaveAttribute('placeholder', f.source);
+  // O ramo atual é só a sugestão (placeholder): dá para digitar, apagar tudo e o campo fica vazio, sem voltar a preencher sozinho.
+  await page.getByLabel('A partir de').fill('main'); await expect(page.getByLabel('A partir de')).toHaveValue('main');
+  await page.getByLabel('A partir de').fill(''); await expect(page.getByLabel('A partir de')).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Criar ramo e trocar →' })).toBeEnabled();
   await page.getByLabel('Ramo', { exact: true }).fill('dev');
   await expect(page.getByRole('button', { name: 'Trocar ramo →', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: /Executar pman/ })).toHaveCount(0); await expect(page.getByLabel('A partir de')).toHaveCount(0);
   await page.getByLabel('Criação dinâmica de ramos').check();
   await expect(page.getByLabel(/^Nome do ramo \d$/)).toHaveCount(4); await expect(page.getByText(/desmarque “Criação dinâmica de ramos”/)).toBeVisible();
+  await page.getByLabel('Nome do ramo 1').fill('lote/um');
+  // Apagar tudo esvazia o campo (nome e "a partir de" da linha 1, sem voltar ao ramo atual sozinho).
+  await page.getByLabel('A partir de (1)').fill('main'); await page.getByLabel('A partir de (1)').fill('');
+  await expect(page.getByLabel('A partir de (1)')).toHaveValue(''); await expect(page.getByLabel('A partir de (1)')).toHaveAttribute('placeholder', f.source);
+  await page.getByLabel('Nome do ramo 1').fill('x'); await page.getByLabel('Nome do ramo 1').fill(''); await expect(page.getByLabel('Nome do ramo 1')).toHaveValue('');
   await page.getByLabel('Nome do ramo 1').fill('lote/um');
   await page.getByLabel('Nome do ramo 2').fill('lote/dois'); await page.getByLabel('A partir de (2)').fill('lote/um');
   await expect(page.getByRole('button', { name: 'Criar 2 ramos e trocar →' })).toBeEnabled();

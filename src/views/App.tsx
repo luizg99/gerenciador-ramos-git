@@ -238,7 +238,7 @@ function Switch({ c, vm }: Props) {
       {vm.branchRows.map((row, index) => <div className="batch-row" key={index}>
         <span className="step-number">{index + 1}</span>
         <label className="field"><span>Nome</span><input aria-label={`Nome do ramo ${index + 1}`} value={row.name} onChange={e => c.setBranchRow(index, { name: e.target.value })} placeholder="feature/novo-ramo" spellCheck={false} autoComplete="off"/></label>
-        <BranchPicker label={`A partir de (${index + 1})`} value={row.base || (index === 0 ? current : '')} branches={[...rows[index].earlier.map(asBranch), ...vm.branches]} onChange={value => c.setBranchRow(index, { base: value })} placeholder={current || 'Ramo de base…'}/>
+        <BranchPicker label={`A partir de (${index + 1})`} value={row.base} branches={[...rows[index].earlier.map(asBranch), ...vm.branches]} onChange={value => c.setBranchRow(index, { base: value })} placeholder={current || 'Ramo de base…'}/>
         <label className="switch-here"><input type="checkbox" checked={switchRow === index} onChange={() => c.toggleSwitchRow(index)}/>Trocar para esse?</label>
         <button className="icon danger visible" title="Remover linha" aria-label={`Remover ramo ${index + 1}`} onClick={() => c.removeBranchRow(index)}>×</button>
         {rows[index].error && <p className="row-error">{rows[index].error}</p>}
@@ -248,7 +248,7 @@ function Switch({ c, vm }: Props) {
       <BranchPicker label="Ramo" value={vm.switchTarget} branches={vm.branches} onChange={switchTarget => c.set({ switchTarget })} placeholder="Pesquise um ramo ou digite o nome de um ramo novo…"/>
       {creating && <div className="create-branch">
         <p>{validName ? <>O ramo <code>{target}</code> não existe. Ele será criado a partir de:</> : <>Nome inválido: não use espaços, <code>{'~ ^ : ? * [ \\'}</code>, <code>..</code> nem termine com <code>/</code>.</>}</p>
-        {validName && <><BranchPicker label="A partir de" value={base} branches={vm.branches} onChange={createBase => c.set({ createBase })}/>
+        {validName && <><BranchPicker label="A partir de" value={vm.createBase} branches={vm.branches} onChange={createBase => c.set({ createBase })} placeholder={current || 'Ramo de base…'}/>
         <label className="manual-check"><input type="checkbox" checked={vm.publishNew} onChange={e => c.set({ publishNew: e.target.checked })}/>Enviar o ramo novo para o remoto (push) depois de criar</label></>}
       </div>}
     </>}

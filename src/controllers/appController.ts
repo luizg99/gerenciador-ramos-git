@@ -366,7 +366,8 @@ export class AppController {
     this.set({ historyRef: ref, loadingHistory: true, error: '' });
     try {
       const id = this.id;
-      const commits = await this.api.log(id, ref, more ? this.state.history.length : 0);
+      // Campo vazio (o usuário apagou tudo) lê o ramo atual; o campo continua vazio na tela.
+      const commits = await this.api.log(id, ref.trim() || 'HEAD', more ? this.state.history.length : 0);
       if (token === this.historyToken && this.repository?.id === id) this.set({ history: more ? [...this.state.history, ...commits] : commits });
     } catch (error) { if (token === this.historyToken) this.set({ error: (error as Error).message }); }
     finally { if (token === this.historyToken) this.set({ loadingHistory: false }); }
