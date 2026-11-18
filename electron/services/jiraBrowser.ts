@@ -77,6 +77,8 @@ export class JiraBrowser {
     const h = Math.max(0, Math.min(height - y, Math.round(bounds.height)));
     view.setBounds({ x, y, width: w, height: h }); view.setVisible(w > 0 && h > 0);
   }
+  // Carrega a sessão do Jira escondida, para a aba abrir já pronta (e o login já validado).
+  warmUp() { this.ensureView(); }
   async open() {
     this.update('loading', 'Abrindo o Jira da equipe…');
     await this.ensureView().webContents.loadURL(JIRA_HOME_URL);

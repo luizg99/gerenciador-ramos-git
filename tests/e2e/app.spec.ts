@@ -34,9 +34,12 @@ test('Electron: projetos, consulta Git real, histórico, validações e fronteir
   await page.getByRole('button', { name: /work.*Abrir projeto/ }).click();
   await expect(page.getByRole('heading', { name: 'Criar / Alterar ramo', exact: true })).toBeVisible();
   await expect(page.locator('.branch-badge')).toContainText(f.source);
-  await page.getByRole('button', { name: /^Projetos/ }).click();
-  await expect(page.getByLabel('Buscar projeto')).toBeHidden(); await expect(page.locator('.project.selected')).toContainText('work');
-  await page.getByRole('button', { name: /^Projetos/ }).click(); await expect(page.getByLabel('Buscar projeto')).toBeVisible();
+  // Seletor "Você está trabalhando na pasta": abre com busca, marca o projeto atual e fecha com Esc.
+  const switcher = page.getByRole('button', { name: /Você está trabalhando na pasta/ });
+  await expect(switcher).toContainText('work'); await expect(page.getByLabel('Buscar projeto')).toBeHidden();
+  await switcher.click(); await expect(page.getByLabel('Buscar projeto')).toBeVisible(); await expect(page.locator('.project.selected')).toContainText('work');
+  await page.getByLabel('Buscar projeto').fill('inexistente'); await expect(page.getByText('Nenhum projeto com esse nome.')).toBeVisible();
+  await page.keyboard.press('Escape'); await expect(page.getByLabel('Buscar projeto')).toBeHidden();
   await expect(page.getByRole('radio')).toHaveCount(3);
   await page.getByLabel('Ramo', { exact: true }).fill('feature/nova-tela');
   await expect(page.getByRole('button', { name: 'Criar ramo e trocar →' })).toBeVisible(); await expect(page.getByLabel('A partir de')).toHaveValue(f.source);

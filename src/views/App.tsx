@@ -12,42 +12,55 @@ const cherryIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" s
 const pullRequestIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5 10.5 6 13 8.5"/></svg>;
 const navigation: { tab: Tab; icon: ReactNode; label: string }[] = [{ tab: 'switch', icon: '⑂', label: 'Criar / Alterar ramo' }, { tab: 'history', icon: '◷', label: 'Histórico' }, { tab: 'commit', icon: '±', label: 'Alterações e commit' }, { tab: 'cherry', icon: cherryIcon, label: 'Cherry-pick' }, { tab: 'pr', icon: pullRequestIcon, label: 'Criar pull request' }, { tab: 'gemini', icon: '✦', label: 'Gemini' }, { tab: 'jira', icon: '▤', label: 'Jira' }, { tab: 'jiraReport', icon: '◔', label: 'Relatório jira' }];
 type Props = { c: AppController; vm: ViewModel };
-// Pastas da raiz de projetos que contém o repositório até o próprio repositório.
-function crumbs(repoPath: string, roots: string[]) {
-  const split = (value: string) => value.split(/[\\/]+/).filter(Boolean);
-  const parts = split(repoPath);
-  const key = (value: string[]) => value.join('/').toLowerCase();
-  const root = roots.map(split).filter(r => r.length <= parts.length && key(parts.slice(0, r.length)) === key(r)).sort((a, b) => b.length - a.length)[0];
-  return root ? parts.slice(Math.max(root.length - 1, 0)) : parts.slice(-1);
-}
 const statusLabels: Record<string, string> = { M: 'Modificado', A: 'Adicionado', D: 'Excluído', R: 'Renomeado', C: 'Copiado', U: 'Em conflito', N: 'Novo (não rastreado)', T: 'Tipo alterado' };
+// Nunca abre sozinho: a última linha corre no resumo e o cliente clica para expandir.
 // Fica fora do App e memoizado: o log (até 200 linhas) só é redesenhado quando chega um evento novo, e não a cada tecla digitada.
 const ActivityLog = memo(function ActivityLog({ progress, busy }: { progress: Progress[]; busy: boolean }) {
   const logRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => { const log = logRef.current; if (log) log.scrollTop = log.scrollHeight; };
   useLayoutEffect(scrollToBottom, [progress, busy]);
   if (!progress.length) return null;
-  return <details className="operation-log" open={busy} onToggle={e => { if (e.currentTarget.open) scrollToBottom(); }}><summary>Atividade da sessão <em>{progress[progress.length - 1]?.message}</em><span>{progress.length} eventos</span></summary><div ref={logRef}>{progress.map((p, i) => <p key={i}><time>{new Date(p.time).toLocaleTimeString('pt-BR')}</time>{p.message}</p>)}</div></details>;
+  return <details className="operation-log" onToggle={e => { if (e.currentTarget.open) scrollToBottom(); }}><summary>Atividade da sessão <em>{progress[progress.length - 1]?.message}</em><span>{progress.length} eventos</span></summary><div ref={logRef}>{progress.map((p, i) => <p key={i}><time>{new Date(p.time).toLocaleTimeString('pt-BR')}</time>{p.message}</p>)}</div></details>;
 });
+// "Você está trabalhando na pasta": troca de projeto direto na barra superior, com busca e atalho para gerenciar as pastas.
+function ProjectSwitcher({ c, vm }: Props) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  const repo = c.repository;
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: MouseEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', outside); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape); };
+  }, [open]);
+  const close = () => { setOpen(false); setSearch(''); };
+  const projects = vm.snapshot.repositories.filter(r => r.name.toLowerCase().includes(search.trim().toLowerCase()));
+  return <div className="project-switcher" ref={box}>
+    <button type="button" className="project-switcher-button" aria-haspopup="listbox" aria-expanded={open} disabled={vm.busy} onClick={() => setOpen(value => !value)} title={repo?.path ?? 'Escolher o projeto'}>
+      <span className="folder" aria-hidden="true">▣</span><span className="lead">{repo ? 'Você está trabalhando na pasta' : 'Nenhum projeto selecionado'}</span>{repo && <strong>{repo.name}</strong>}<span className="chevron" aria-hidden="true">▾</span>
+    </button>
+    {open && <div className="project-menu">
+      <input autoFocus className="project-search" placeholder="Buscar projeto…" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar projeto"/>
+      <div className="project-list" role="listbox" aria-label="Projetos">{projects.map(r => <button key={r.id} role="option" aria-selected={r.id === repo?.id} className={`project ${r.id === repo?.id ? 'selected' : ''}`} onClick={() => { close(); void c.selectRepository(r.id); }} title={r.path}><span className="project-icon">▣</span><span><strong>{r.name}</strong><small>{r.path}</small></span>{r.id === repo?.id && <i/>}</button>)}
+        {!projects.length && <p className="sidebar-hint">{vm.snapshot.repositories.length ? 'Nenhum projeto com esse nome.' : vm.loadingRepository || vm.snapshot.scanning ? 'Carregando pastas…' : 'Adicione sua pasta de projetos para começar.'}</p>}</div>
+      <div className="project-menu-footer"><span>{vm.snapshot.repositories.length} {vm.snapshot.repositories.length === 1 ? 'projeto' : 'projetos'}{vm.snapshot.scanning ? ' · atualizando…' : ''}</span><button type="button" className="quiet" onClick={() => { close(); c.selectTab('projects'); }}>Gerenciar pastas de projetos</button></div>
+    </div>}
+  </div>;
+}
 export function App({ controller: c }: { controller: AppController }) {
   const vm = useSyncExternalStore(c.subscribe, c.getSnapshot);
-  const [search, setSearch] = useState('');
   const [cloneOpen, setCloneOpen] = useState(false);
-  const [projectsOpen, setProjectsOpen] = useState(() => { try { return localStorage.getItem('projectsOpen') !== 'false'; } catch { return true; } });
-  const toggleProjects = () => { const open = !projectsOpen; setProjectsOpen(open); try { localStorage.setItem('projectsOpen', String(open)); } catch { /* preferência só desta máquina */ } };
   useEffect(() => c.connect(), [c]);
   useLayoutEffect(() => { document.documentElement.dataset.theme = c.theme; }, [c, vm.snapshot.settings.theme]);
   const repo = c.repository;
-  const visibleProjects = projectsOpen ? vm.snapshot.repositories.filter(r => r.name.toLowerCase().includes(search.toLowerCase())) : vm.snapshot.repositories.filter(r => r.id === repo?.id);
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark">⑂</div>Ramos</div>
-      <p className="sidebar-hint switch-folder-hint">Troque de pasta aqui</p><div className="sidebar-label"><button className="collapse" aria-expanded={projectsOpen} title={projectsOpen ? 'Recolher lista de projetos' : 'Expandir lista de projetos'} onClick={toggleProjects}><span aria-hidden="true">{projectsOpen ? '▾' : '▸'}</span>Projetos <small>{vm.snapshot.repositories.length}</small>{vm.snapshot.scanning && <small className="scanning" title="Procurando projetos novos ou removidos nas pastas">atualizando…</small>}</button><button title="Gerenciar pastas" aria-label="Gerenciar pastas" onClick={() => c.selectTab('projects')} disabled={vm.busy}>＋</button></div>
-      {projectsOpen && <input className="project-search" placeholder="Buscar projeto…" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar projeto"/>}
-      <div className="project-list">{visibleProjects.map(r => <button key={r.id} disabled={vm.busy} className={`project ${r.id === repo?.id ? 'selected' : ''}`} onClick={() => c.selectRepository(r.id)} title={r.path}><span className="project-icon">▣</span><span>{r.name}</span>{r.id === repo?.id && <i/>}</button>)}{projectsOpen && !vm.snapshot.repositories.length && <p className="sidebar-hint">{vm.loadingRepository || vm.snapshot.scanning ? 'Carregando pastas…' : 'Adicione sua pasta de projetos para começar.'}</p>}</div>
       <div className="sidebar-label">Repositório</div><nav>{navigation.filter(item => item.tab === 'gemini' ? c.useGemini : (item.tab === 'jira' || item.tab === 'jiraReport') ? c.useJira : item.tab === 'pr' ? c.useAzure : true).map(item => <button key={item.tab} aria-label={item.label} disabled={(item.tab !== 'gemini' && item.tab !== 'jira' && item.tab !== 'jiraReport' && !repo) || vm.busy} className={[vm.tab === item.tab ? 'selected' : '', item.tab === 'gemini' ? 'gemini-nav' : '', item.tab === 'jira' ? 'jira-nav' : ''].join(' ')} onClick={() => c.selectTab(item.tab)}><span aria-hidden="true">{item.icon}</span>{item.label}{item.tab === 'commit' && !!vm.status?.files.length && <b>{vm.status.files.length}</b>}</button>)}</nav>
-      <button className={`settings-link ${vm.tab === 'projects' ? 'selected' : ''}`} onClick={() => c.selectTab('projects')} disabled={vm.busy}>▣ Pastas de projetos</button><button className={`settings-link ${vm.tab === 'settings' ? 'selected' : ''}`} onClick={() => c.selectTab('settings')} disabled={vm.busy}>⚙ Configurações</button><div className="sidebar-footer"><ThemePicker c={c} disabled={vm.busy}/><span>v{packageJson.version}</span></div>
+      <button className={`settings-link ${vm.tab === 'settings' ? 'selected' : ''}`} onClick={() => c.selectTab('settings')} disabled={vm.busy}>⚙ Configurações</button><div className="sidebar-footer"><ThemePicker c={c} disabled={vm.busy}/><span>v{packageJson.version}</span></div>
     </aside>
-    <main>{!['jira', 'gemini'].includes(vm.tab) && <header className="topbar"><div className="topbar-title">{repo ? <nav className="crumbs" aria-label="Caminho do projeto" title={repo.path}>{crumbs(repo.path, vm.snapshot.settings.roots).map((part, i, all) => i === all.length - 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}<i>/</i></span>)}</nav> : <strong>Nenhum projeto selecionado</strong>}{vm.status && <span className="branch-badge" title="Ramo atual"><span className="branch-name" aria-label={`Ramo atual ${vm.status.branch}`}>⑂ {vm.status.branch}</span><button type="button" className="copy-branch" title="Copiar nome do ramo" aria-label="Copiar nome do ramo" disabled={vm.busy} onClick={c.copyBranchName}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></span>}{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado do repositório e busca os ramos novos do remoto (git fetch --all --prune)">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy || !vm.status || vm.status.branch.startsWith('(')} onClick={c.fetch} title={`Busca apenas ${vm.status?.upstream ?? vm.status?.branch ?? 'o ramo atual'} no servidor (git fetch)`}>⇣ Buscar da {vm.status?.upstream?.split('/').slice(1).join('/') || vm.status?.branch || 'ramo atual'}</button>}</div></header>}
+    <main>{!['jira', 'gemini'].includes(vm.tab) && <header className="topbar"><div className="topbar-title">{vm.status && <span className="branch-badge" title="Ramo atual"><span className="branch-name" aria-label={`Ramo atual ${vm.status.branch}`}>⑂ {vm.status.branch}</span><button type="button" className="copy-branch" title="Copiar nome do ramo" aria-label="Copiar nome do ramo" disabled={vm.busy} onClick={c.copyBranchName}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></span>}{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><ProjectSwitcher c={c} vm={vm}/><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado do repositório e busca os ramos novos do remoto (git fetch --all --prune)">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy || !vm.status || vm.status.branch.startsWith('(')} onClick={c.fetch} title={`Busca apenas ${vm.status?.upstream ?? vm.status?.branch ?? 'o ramo atual'} no servidor (git fetch)`}>⇣ Buscar da {vm.status?.upstream?.split('/').slice(1).join('/') || vm.status?.branch || 'ramo atual'}</button>}</div></header>}
       <div className="page-scroll"><div className="page"><div className="page-heading"><div className="page-heading-top"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1>{vm.tab === 'projects' && <button type="button" className="primary" disabled={vm.busy} onClick={() => setCloneOpen(true)}>＋ Clonar repositório</button>}</div><p>{({ settings: 'Preferências lembradas neste computador.', projects: 'Escolha um projeto para começar ou gerencie as pastas onde eles ficam.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Acompanha as alterações pendentes e abre o commit no TortoiseGit.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Crie os pull requests no Azure com as mensagens dos commits na descrição.', gemini: 'Prepare a documentação da entrega com o Gem da equipe.', jira: 'Revise e execute o encerramento das tarefas no Jira.', jiraReport: 'Acompanhe o que cada pessoa da squad já concluiu no Jira.' })[vm.tab]}</p></div>
       {vm.error && <div className="alert error" role="alert"><strong>Não foi possível concluir</strong><p>{vm.error}</p><button onClick={() => c.set({ error: '' })}>Fechar</button></div>}
       {vm.notice && <div className="alert success" role="status">{vm.notice}</div>}

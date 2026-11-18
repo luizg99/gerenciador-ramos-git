@@ -177,6 +177,8 @@ else {
     controller = new ApplicationController(git, new Storage(app.getPath('userData')), report, changed);
     // A janela abre já; as chamadas IPC aguardam só a leitura das configurações e da lista salva.
     ready = controller.initialize().then(() => applyTheme()); registerIpc(); await createWindow(); watchForUpdates(() => window, () => controller.busy); await ready;
+    // Com "Usa Jira" ligado, a sessão do Jira carrega em segundo plano logo após a abertura (nos testes automatizados não, para não depender da rede).
+    if (controller.settings.useJira && !(process.env.RAMOS_TEST_DATA && !app.isPackaged)) setTimeout(() => { if (window && !window.isDestroyed()) jira.warmUp(); }, 1500);
   }).catch(error => { dialog.showErrorBox('Falha ao iniciar', (error as Error).message); app.quit(); });
   // Ao fechar a última janela, grava os cookies de login (Gemini e Jira) em disco, para não pedir login de novo na próxima abertura.
   app.on('window-all-closed', () => {
