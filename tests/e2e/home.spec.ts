@@ -49,6 +49,12 @@ test('Início: só aparece com "Usa Jira" e mostra as tarefas do usuário em col
   await page.waitForTimeout(1500);
   await page.getByRole('button', { name: 'Início', exact: true }).click();
 
+  // Abre filtrado pela sprint mais recente (Sprint 13): só a sub-tarefa DDV-200 e a principal dela como contexto.
+  const sprintFilter = page.getByLabel('Filtrar por sprint');
+  await expect(sprintFilter).toHaveValue('Sprint 13');
+  await expect(page.getByText('tarefas atribuídas').or(page.getByText('tarefa atribuída'))).toContainText('1');
+  expect(await page.locator('.kanban-column h2').allTextContents()).toEqual(['Em teste']);
+  await sprintFilter.selectOption({ label: 'Todas as sprints' });
   await expect(page.getByText('tarefas atribuídas')).toContainText('4');
   await expect(page.getByText('Luiz Ramos')).toBeVisible();
   expect(await app.evaluate(() => (globalThis as any).homeJql)).toContain('assignee = currentUser()');
@@ -62,6 +68,17 @@ test('Início: só aparece com "Usa Jira" e mostra as tarefas do usuário em col
   // Sub-tarefa do usuário com principal de outra pessoa: a principal aparece como contexto.
   const context = page.locator('.kanban-card.context');
   await expect(context).toContainText('DDV-199'); await expect(context).toContainText('atribuída a outra pessoa'); await expect(context.locator('.kanban-children')).toContainText('DDV-200');
+  // Botão direito no cartão: copia o número da issue (da principal ou da sub-tarefa, sem subir para a principal).
+  await page.locator('.kanban-card', { hasText: 'DDV-101' }).first().locator('.kanban-summary').first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /Copiar número da issue/ }).click();
+  await expect(page.getByText('DDV-101 copiado')).toBeVisible();
+  expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe('DDV-101');
+  await parent.locator('.kanban-card.child .kanban-summary').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar número da issue (DDV-102)' })).toBeVisible();
+  await page.getByRole('menuitem', { name: /Copiar número da issue/ }).click();
+  expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe('DDV-102');
+  await page.locator('.kanban-card', { hasText: 'DDV-300' }).first().locator('.kanban-summary').click({ button: 'right' });
+  await page.keyboard.press('Escape'); await expect(page.getByRole('menuitem')).toHaveCount(0);
   // Sprint: aparece no cartão e filtra o quadro (mais recente primeiro; "Sem sprint" para quem não tem).
   await expect(parent).toContainText('Sprint 12');
   await expect(page.locator('.kanban-card', { hasText: 'DDV-300' }).first()).toContainText('Sem sprint');

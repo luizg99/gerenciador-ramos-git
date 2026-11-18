@@ -989,3 +989,5 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .jira-mine-summary{font-size:13px;overflow-wrap:anywhere}
 .jira-mine-meta{display:flex;gap:6px;flex-wrap:wrap}
 .jira-mine-meta em{font-style:normal;font-size:11px;padding:1px 8px;border-radius:980px;background:var(--panel-2);color:var(--secondary)}
+.kanban-copied{font-size:12px;font-weight:500;color:var(--green);padding:4px 12px;border-radius:980px;background:var(--success-bg)}
+.kanban-card{cursor:default}
