@@ -1,7 +1,7 @@
 import type { Api, Branch, CloneSource, Commit, Execution, Progress, PullRequestInfo, RemoteRepository, Snapshot, Status, SwitchMode, TortoiseOptions, UiPreferences } from '../models/domain';
 import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
-export type Tab = 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira' | 'jiraReport';
+export type Tab = 'home' | 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira' | 'jiraReport';
 export interface ViewModel {
   snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
   switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[];
@@ -125,7 +125,8 @@ export class AppController {
     try { await this.refreshData(); if (token === this.loadToken) { this.prefillSource(); void this.fetchRemoteBranches(); } } catch (error) { if (token === this.loadToken) this.set({ error: (error as Error).message }); }
     finally { if (token === this.loadToken) this.set({ loadingRepository: false }); }
   }
-  initialize = async () => { await this.loadInBackground(); if (!this.repository) this.set({ tab: 'projects' }); };
+  // Com "Usa Jira" ligado o app abre no Início (quadro de tarefas); sem ele, abre na tela de ramos ou, sem projeto, em Projetos.
+  initialize = async () => { await this.loadInBackground(); if (this.useJira) this.set({ tab: 'home' }); else if (!this.repository) this.set({ tab: 'projects' }); };
   // Traz os ramos novos do remoto (git fetch --all --prune); falhas (rede/credenciais) não impedem de usar a lista local.
   private async fetchRemoteBranches() {
     if (!this.repository) return;
