@@ -1010,3 +1010,9 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .kanban-key{white-space:nowrap}
 @media(max-width:1280px){.project-switcher-button:not(:has(strong)) .lead{display:inline}}
 .kanban-column h2{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25}
+
+/* Quadro com altura da tela: barra horizontal sempre à vista e cada coluna rola na vertical */
+.page:has(.kanban-board){padding-bottom:16px}
+.kanban-columns{height:var(--kanban-height,60vh);overflow-x:auto;overflow-y:hidden;align-items:stretch;grid-template-rows:minmax(0,1fr);padding-bottom:10px}
+.kanban-column{display:flex;flex-direction:column;min-height:0}
+.kanban-cards{overflow-y:auto;min-height:0;flex:1;align-content:start;padding-right:2px}

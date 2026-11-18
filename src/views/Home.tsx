@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppController } from '../controllers/appController';
 import { JIRA_BASE } from '../models/jira';
 import { NO_SPRINT, cardColumnId, countMine, filterBySprint, findCard, findMove, hasCards, hasWithoutSprint, moveTarget, sameStatus, sprintOptions, type HomeCard, type HomeColumn, type JiraMove } from '../models/jiraHome';
@@ -47,6 +47,22 @@ export function Home({ c }: { c: AppController }) {
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState('');
   const confirmation = useRef<HTMLDialogElement>(null);
+  // O quadro ocupa só o que sobra da tela: a barra de rolagem horizontal fica sempre visível embaixo e cada coluna rola sozinha na vertical.
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const fit = () => {
+    const element = columnsRef.current; if (!element) return;
+    const scroller = element.closest('.page-scroll') as HTMLElement | null;
+    const bottom = scroller ? scroller.getBoundingClientRect().bottom : innerHeight;
+    element.style.setProperty('--kanban-height', `${Math.max(260, Math.floor(bottom - element.getBoundingClientRect().top - 34))}px`);
+  };
+  useLayoutEffect(fit);
+  useEffect(() => {
+    const scroller = columnsRef.current?.closest('.page-scroll');
+    const observer = new ResizeObserver(fit);
+    if (scroller) observer.observe(scroller);
+    addEventListener('resize', fit);
+    return () => { observer.disconnect(); removeEventListener('resize', fit); };
+  }, [enabled]);
   const run = useRef(0);
   const failed = useRef(false);
   const openMenu: OpenMenu = (event, key) => {
@@ -121,7 +137,7 @@ export function Home({ c }: { c: AppController }) {
     {moveError && <div className="alert error" role="alert"><strong>Status não alterado</strong><p>{moveError}</p><button onClick={() => setMoveError('')}>Fechar</button></div>}
     {error && <div className="alert error" role="alert"><strong>Não foi possível carregar suas tarefas</strong><p>{error}</p><div className="kanban-error-actions"><button onClick={() => void load()}>Tentar de novo</button><button onClick={() => c.selectTab('jira')}>Abrir o Jira para fazer login</button></div></div>}
     {shown && !hasCards(shown) && !error && <p className="kanban-empty-note">{effective ? 'Nenhuma tarefa sua nessa sprint.' : 'Nenhuma tarefa em aberto atribuída a você.'}</p>}
-    {!!shown?.length && <div className="kanban-columns" onDragOver={event => {
+    {!!shown?.length && <div className="kanban-columns" ref={columnsRef} onDragOver={event => {
       // Arrastando um cartão perto da borda, a lista de colunas rola sozinha para dar para chegar às colunas fora da tela.
       if (!dragging) return;
       const box = event.currentTarget.getBoundingClientRect();
