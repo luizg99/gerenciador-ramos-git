@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildHomeBoard, countMine, type HomeIssue } from '../src/models/jiraHome';
+import { NO_SPRINT, buildHomeBoard, countMine, filterBySprint, hasWithoutSprint, sprintOptions, type HomeIssue } from '../src/models/jiraHome';
+import type { SprintRef } from '../src/models/jiraReport';
 
 const status = (name: string, category: string) => ({ name, statusCategory: { key: category } });
 const issue = (key: string, state: ReturnType<typeof status>, extra: Partial<HomeIssue['fields']> = {}): HomeIssue => ({ key, fields: { summary: `Resumo ${key}`, issuetype: { name: 'Task' }, status: state, ...extra } });
@@ -49,5 +50,33 @@ describe('quadro da tela inicial', () => {
     const board = buildHomeBoard([{ key: 'X-1', fields: {} }]);
     expect(board[0].status).toBe('Sem status');
     expect(board[0].cards[0]).toMatchObject({ key: 'X-1', summary: '', mine: true });
+  });
+
+  it('mostra a sprint mais recente de cada tarefa e filtra por sprint, mantendo a principal como contexto', () => {
+    const sprints: Record<string, SprintRef[]> = {
+      'P-1': [{ name: 'Sprint 11', start: 100, end: 200 }, { name: 'Sprint 12', start: 300, end: 400 }], // passou por duas: vale a mais recente
+      'P-2': [{ name: 'Sprint 13', start: 500, end: 600 }], 'P-3': []
+    };
+    const parent = { key: 'P-1', fields: { summary: 'Principal', status: status('Em desenvolvimento', 'indeterminate') } };
+    const board = buildHomeBoard([
+      issue('P-1', status('Em desenvolvimento', 'indeterminate')), issue('P-2', status('Aberto', 'new'), { parent }), issue('P-3', status('Aberto', 'new'))
+    ], found => sprints[found.key]);
+    expect(board.flatMap(column => column.cards).find(card => card.key === 'P-1')?.sprint).toBe('Sprint 12');
+    expect(sprintOptions(board).map(option => option.name)).toEqual(['Sprint 13', 'Sprint 12']);
+    expect(hasWithoutSprint(board)).toBe(true);
+
+    const only13 = filterBySprint(board, 'Sprint 13');
+    expect(only13).toHaveLength(1);
+    expect(only13[0].cards[0]).toMatchObject({ key: 'P-1' });
+    expect(only13[0].cards[0].children.map(card => card.key)).toEqual(['P-2']);
+    expect(countMine(only13)).toBe(2); // a principal também é do usuário (sprint 12) e continua como contexto da sub-tarefa
+
+    const only12 = filterBySprint(board, 'Sprint 12');
+    expect(only12[0].cards[0].children).toEqual([]);
+    expect(only12.flatMap(column => column.cards.map(card => card.key))).toEqual(['P-1']);
+
+    expect(filterBySprint(board, NO_SPRINT).flatMap(column => column.cards.map(card => card.key))).toEqual(['P-3']);
+    expect(filterBySprint(board, '')).toBe(board);
+    expect(filterBySprint(board, 'Sprint 99')).toEqual([]);
   });
 });

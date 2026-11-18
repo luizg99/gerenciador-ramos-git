@@ -2,6 +2,9 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { JiraBounds, JiraBrowserState, JiraCurrentUser, JiraFieldMeta, JiraIssue, JiraMethod, JiraTransition, JiraWorklog } from '../models/jira';
 import { greeting } from '../models/reviewMessage';
 import { RichPaste } from './RichPaste';
+import { cachedBoard, fetchMyBoard, type MyBoard } from './jiraMine';
+import { normalizeText } from '../models/jiraReport';
+import type { HomeCard } from '../models/jiraHome';
 import { JIRA_BASE, JIRA_FLAG_PATH, isImpeded, parseJiraKey, parsePrLinks, originalEstimateSeconds, ownEstimateSeconds } from '../models/jira';
 
 type Role = '' | 'coding' | 'support';
@@ -35,6 +38,12 @@ export const Jira = memo(function Jira({ active = true }: { active?: boolean }) 
 function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [key, setKey] = useState('');
+  // Filtro "Minhas tarefas": lista as tarefas atribuídas ao usuário logado; clicar em uma carrega o fluxo dela.
+  const [mineOpen, setMineOpen] = useState(false);
+  const [mine, setMine] = useState<MyBoard | null>(cachedBoard());
+  const [mineLoading, setMineLoading] = useState(false);
+  const [mineError, setMineError] = useState('');
+  const [mineFilter, setMineFilter] = useState('');
   const [main, setMain] = useState<JiraIssue>();
   const [impeded, setImpeded] = useState<{ key: string; summary: string } | null>(null);
   const flagField = useRef<string | null | undefined>(undefined);
@@ -116,6 +125,15 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     } catch { return null; }
     return flagField.current;
   };
+  const refreshMine = async (force: boolean) => {
+    const cached = cachedBoard();
+    if (!force && cached && Date.now() - cached.at < 60_000) { setMine(cached); return; }
+    setMineLoading(true); setMineError('');
+    try { setMine(await fetchMyBoard()); } catch (e) { setMineError((e as Error).message); }
+    finally { setMineLoading(false); }
+  };
+  const toggleMine = () => { const next = !mineOpen; setMineOpen(next); if (next) void refreshMine(false); };
+  const pickMine = (issueKey: string) => { setMineOpen(false); setKey(issueKey); void action(async () => { await loadIssueByKey(issueKey); }); };
   const loadIssue = () => action(async () => { await loadIssueByKey(parseJiraKey(key)); });
   const loadIssueByKey = async (issueKey: string, noticePrefix = '') => {
     const flagId = await flaggedFieldId();
@@ -435,6 +453,26 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
       <div className="jira-workflow-scroll">
         <label className="jira-search-label" htmlFor="jira-issue-key">Tarefa principal</label>
         <div className="jira-toolbar jira-search"><input id="jira-issue-key" aria-label="Chave da tarefa principal" placeholder="Cole o link ou informe DDVENDAS-61611" value={key} onChange={e => setKey(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void loadIssue(); }}/><button className="primary" disabled={busy || !key.trim()} onClick={() => void loadIssue()}>{busy ? 'Aguarde…' : 'Carregar tarefa'}</button><button className="quiet" disabled={busy} onClick={clear}>Limpar tarefa...</button></div>
+        <div className="jira-mine">
+          <button type="button" className="quiet" aria-expanded={mineOpen} onClick={toggleMine}>{mineOpen ? '▾' : '▸'} Minhas tarefas{mine ? ` (${mine.columns.flatMap(column => column.cards).length})` : ''}</button>
+          {mineOpen && <div className="jira-mine-panel">
+            <div className="jira-toolbar"><input aria-label="Filtrar minhas tarefas" placeholder="Filtrar por código, resumo, status ou sprint…" value={mineFilter} onChange={e => setMineFilter(e.target.value)} autoFocus/><button className="quiet" disabled={mineLoading} onClick={() => void refreshMine(true)} title="Buscar de novo no Jira">{mineLoading ? 'Buscando…' : '↻'}</button></div>
+            {mineError && <p className="inline-warning" role="alert">{mineError}</p>}
+            {(() => {
+              const cards = (mine?.columns ?? []).flatMap(column => column.cards);
+              const text = (card: HomeCard): string => [card.key, card.summary, card.status, card.sprint, ...card.children.map(text)].join(' ');
+              const query = normalizeText(mineFilter.trim());
+              const shown = query ? cards.filter(card => normalizeText(text(card)).includes(query)) : cards;
+              if (!mine) return mineLoading ? <p className="hint">Buscando suas tarefas…</p> : null;
+              if (!shown.length) return <p className="hint">{cards.length ? 'Nenhuma tarefa com esse filtro.' : 'Nenhuma tarefa em aberto atribuída a você.'}</p>;
+              return <div className="jira-mine-list" role="list">{shown.map(card => <button key={card.key} type="button" role="listitem" className="jira-mine-row" disabled={busy} onClick={() => pickMine(card.key)}>
+                <span><strong>{card.key}</strong>{card.type && <small> · {card.type}</small>}</span>
+                <span className="jira-mine-summary">{card.summary || 'Sem resumo'}</span>
+                <span className="jira-mine-meta"><em>{card.status}</em>{card.sprint && <em>{card.sprint}</em>}{!card.mine && <em>sua sub-tarefa: {card.children.map(child => child.key).join(', ')}</em>}{card.mine && card.children.length > 0 && <em>{card.children.length} {card.children.length === 1 ? 'sub-tarefa sua' : 'sub-tarefas suas'}</em>}</span>
+              </button>)}</div>;
+            })()}
+          </div>}
+        </div>
         <p className="hint">A sessão é independente da autenticação Git. Faça login no painel Jira ao lado antes de carregar uma tarefa.</p>
         {error && <div className="alert error" role="alert">{error}<button onClick={() => setError('')}>Fechar</button></div>}
         {notice && <div className="alert success" role="status">{notice}</div>}

@@ -970,3 +970,22 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .sidebar nav .gemini-nav::before,.sidebar nav .jira-nav::before{top:-9px}
 .sidebar nav .gemini-nav+.jira-nav{margin-top:16px}
 .sidebar-footer{border-top:1px solid var(--line);margin-top:10px;padding-top:14px}
+.kanban-tools{display:flex;align-items:center;gap:12px}
+.kanban-filter{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.kanban-filter select{padding:7px 30px 7px 12px;border-radius:980px;background:var(--panel);border-color:transparent;font-weight:500;max-width:300px}
+.kanban-sprint{display:inline-block;margin-top:6px;font-size:11px;font-weight:500;padding:2px 9px;border-radius:980px;background:var(--accent-soft);color:var(--selected);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+.kanban-sprint.none{background:var(--panel-2);color:var(--subtle)}
+
+/* Jira: filtro "Minhas tarefas" */
+.jira-mine{margin:4px 0 8px}
+.jira-mine>.quiet{padding-left:0}
+.jira-mine-panel{background:var(--bg);border-radius:14px;padding:10px;margin-top:4px}
+.jira-mine-panel .jira-toolbar{margin:0 0 8px}
+.jira-mine-list{display:grid;gap:2px;max-height:300px;overflow:auto}
+.jira-mine-row{display:grid;gap:2px;text-align:left;border-radius:10px;padding:8px 10px;background:none;white-space:normal}
+.jira-mine-row:hover:not(:disabled){background:var(--accent-soft)}
+.jira-mine-row strong{color:var(--accent)}
+.jira-mine-row small{color:var(--subtle)}
+.jira-mine-summary{font-size:13px;overflow-wrap:anywhere}
+.jira-mine-meta{display:flex;gap:6px;flex-wrap:wrap}
+.jira-mine-meta em{font-style:normal;font-size:11px;padding:1px 8px;border-radius:980px;background:var(--panel-2);color:var(--secondary)}
