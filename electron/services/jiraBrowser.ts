@@ -1,5 +1,5 @@
 import { WebContentsView, type BrowserWindow } from 'electron';
-import { getJiraToken, jiraTokenRequest, TokenRefusedError } from './jiraToken';
+import { getJiraToken, jiraTokenAddImpediment, jiraTokenRequest, TokenRefusedError } from './jiraToken';
 import { keepLoginsAcrossRestarts } from './persistentSession';
 import { isAllowedJiraPath, isAllowedJiraXmlPath, JIRA_BASE, JIRA_HOME_URL, type JiraBounds, type JiraBrowserState, type JiraMethod } from '../../src/models/jira';
 
@@ -108,6 +108,34 @@ export class JiraBrowser {
     return result;
   }
   // Texto puro de uma página de exportação (XML da issue), com a sessão já logada.
+  // Flag + classificação + comentário pela janela do plugin (mesmo formulário do navegador). Com token usa o token; senão, a sessão do Jira.
+  async addImpediment(issueKey: string, classification: string, comment: string): Promise<void> {
+    const token = await getJiraToken();
+    if (token) {
+      try { return await jiraTokenAddImpediment(token, issueKey, classification, comment); }
+      catch (error) { if (!(error instanceof TokenRefusedError)) throw error; }
+    }
+    const contents = this.ensureView().webContents;
+    let url: URL;
+    try { url = new URL(contents.getURL()); } catch { throw new Error('A sessão do Jira ainda está carregando.'); }
+    if (url.origin !== JIRA_BASE) throw new Error('Conclua o login no Jira da equipe antes de colocar o flag.');
+    if (contents.isLoadingMainFrame()) throw new Error('Aguarde o Jira terminar de carregar.');
+    const page = `/plugins/servlet/plugintotvs/impediment-classification`;
+    await contents.executeJavaScriptInIsolatedWorld(999, [{ code: `(async () => {
+      if (location.origin !== ${JSON.stringify(JIRA_BASE)}) throw new Error('A sessão do Jira expirou.');
+      const got = await fetch(${JSON.stringify(page + '?issueKeys=' + encodeURIComponent(issueKey))}, { credentials: 'same-origin' });
+      if (!got.ok || got.redirected) throw new Error('O Jira pediu login de novo. Entre no Jira da equipe e tente outra vez.');
+      const doc = new DOMParser().parseFromString(await got.text(), 'text/html');
+      const params = new URLSearchParams();
+      doc.querySelectorAll('input[type=hidden]').forEach(input => { if (input.name) params.set(input.name, input.value); });
+      if (!params.get('issue-key')) params.set('issue-key', ${JSON.stringify(issueKey)});
+      if (!params.get('previous-url')) params.set('previous-url', ${JSON.stringify(JIRA_BASE + '/browse/' + issueKey)});
+      params.set('classification', ${JSON.stringify(classification)});
+      params.set('impediment-comment', ${JSON.stringify(comment)});
+      const res = await fetch(${JSON.stringify(page)}, { method: 'POST', credentials: 'same-origin', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+      if (res.type !== 'opaqueredirect' && !res.ok) throw new Error('Jira respondeu HTTP ' + res.status + ' ao enviar a classificação do impedimento.');
+    })()` }]);
+  }
   async requestText(path: string): Promise<string> {
     const token = await getJiraToken();
     if (!token) return this.sessionRequestText(path);

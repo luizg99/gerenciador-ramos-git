@@ -5,6 +5,10 @@ export const JIRA_FLAG_PATH = '/rest/greenhopper/1.0/xboard/issue/flag/flag.json
 export const isAllowedJiraPath = (path: string) => !path.includes('..') && (path.startsWith('/rest/api/2/') || path === JIRA_FLAG_PATH);
 // Exportação XML de uma issue (a mesma do menu Exportar → XML do Jira); só leitura.
 export const isAllowedJiraXmlPath = (path: string) => /^\/si\/jira\.issueviews:issue-xml\/[A-Za-z][A-Za-z0-9_]*-\d+\/[A-Za-z][A-Za-z0-9_]*-\d+\.xml$/.test(path);
+// Janela "Classificar Impedimento": página do plugin da TOTVS (é ela que grava a classificação junto com o flag).
+export const IMPEDIMENT_PAGE = '/plugins/servlet/plugintotvs/impediment-classification';
+export const impedimentPagePath = (key: string) => `${IMPEDIMENT_PAGE}?issueKeys=${encodeURIComponent(key)}`;
+export const isAllowedImpedimentPath = (path: string) => path === IMPEDIMENT_PAGE || /^\/plugins\/servlet\/plugintotvs\/impediment-classification\?issueKeys=[A-Za-z][A-Za-z0-9_]*-\d+$/.test(path);
 // Impedido = campo Flagged com a opção "Impediment" (aceita também o nome em português).
 export function isImpeded(issue: { fields: Record<string, unknown> }, flagFieldId: string | null | undefined) {
   if (!flagFieldId) return false;

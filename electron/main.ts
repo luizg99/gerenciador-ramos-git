@@ -13,9 +13,9 @@ import type { Snapshot } from '../src/models/domain';
 import { installTextContextMenu } from './textContextMenu';
 import { GeminiBrowser } from './services/geminiBrowser';
 import { GEM_URL } from '../src/models/gemini';
-import { isAllowedJiraPath, isAllowedJiraXmlPath } from '../src/models/jira';
+import { impedimentPagePath, isAllowedJiraPath, isAllowedJiraXmlPath } from '../src/models/jira';
 import { JiraBrowser } from './services/jiraBrowser';
-import { clearJiraToken, getJiraToken, isJiraTokenRefused, jiraTokenRequest, saveJiraToken } from './services/jiraToken';
+import { clearJiraToken, getJiraToken, isJiraTokenRefused, jiraTokenPage, jiraTokenRequest, saveJiraToken } from './services/jiraToken';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 import { openTortoise } from './services/tortoiseGit';
 import { watchForUpdates } from './services/autoUpdate';
@@ -66,6 +66,12 @@ function registerIpc() {
     await saveJiraToken(token);
     return me?.displayName ?? me?.name ?? '';
   });
+  handle('jira:impedimentPage', z.tuple([z.string().regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/)]), async key => {
+    const token = await getJiraToken();
+    if (!token) throw new Error('A janela de impedimento precisa do token do Jira (Configurações).');
+    return jiraTokenPage(token, impedimentPagePath(key));
+  });
+  handle('jira:addImpediment', z.tuple([z.string().regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/), z.string().min(1).max(200), z.string().max(4000)]), (key, classification, comment) => jira.addImpediment(key, classification, comment));
   handle('jira:clearToken', z.tuple([]), () => clearJiraToken());
   handle('jira:requestText', z.tuple([z.string().min(1).max(512).refine(isAllowedJiraXmlPath)]), path => jira.requestText(path));
   handle('jira:request', z.tuple([

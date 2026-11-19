@@ -34,6 +34,8 @@ export interface Api {
   jiraTokenStatus(): Promise<'none' | 'ok' | 'refused'>;
   setJiraToken(token: string): Promise<string>;
   clearJiraToken(): Promise<void>;
+  jiraAddImpediment(issueKey: string, classification: string, comment: string): Promise<void>;
+  jiraImpedimentPage(key: string): Promise<string>;
   jiraRequestText(path: string): Promise<string>;
   jiraRequest(path: string, method?: JiraMethod, body?: unknown): Promise<unknown>;
   onJiraState(callback: (state: JiraBrowserState) => void): () => void;

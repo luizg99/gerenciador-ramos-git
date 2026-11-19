@@ -141,27 +141,22 @@ export async function fetchImpedimentNote(key: string): Promise<string> {
 export async function setFlagged(key: string, flag: boolean, details: FlagDetails = {}): Promise<void> {
   const id = await flaggedFieldId();
   if (!id) throw new Error('Campo Flagged não encontrado neste Jira.');
-  try { await window.gitManager.jiraRequest(JIRA_FLAG_PATH, 'POST', { issueKeys: [key], flag, ...(flag && details.comment?.trim() ? { comment: details.comment.trim() } : {}) }); }
-  catch (cause) {
-    // Só tenta o campo direto quando o endpoint do quadro não existe/aceita; erro de rede ou de sessão aparece como está.
-    if (!/HTTP (400|404|405)/.test((cause as Error).message)) throw cause;
-    const current = (await window.gitManager.jiraRequest(`${issuePath(key)}?fields=${id}`) as { fields: Record<string, unknown> }).fields[id];
-    const values = (Array.isArray(current) ? current : []) as { value?: string }[];
-    const kept = values.filter(item => !/imped/i.test(item?.value ?? ''));
-    await window.gitManager.jiraRequest(issuePath(key), 'PUT', { fields: { [id]: flag ? [...kept, { value: values.find(item => /imped/i.test(item?.value ?? ''))?.value ?? 'Impediment' }] : kept.map(item => ({ value: item.value })) } });
-    // O endpoint do quadro (que registra "(flag) Marcação adicionada" + comentário) não foi usado: registra o comentário à mão.
-    if (flag) await window.gitManager.jiraRequest(`${issuePath(key)}/comment`, 'POST', { body: `(flag) Marcação adicionada\n\n${details.comment?.trim() ?? ''}` }).catch(() => {});
+  if (flag) {
+    // Colocar: pela janela "Classificar Impedimento" do Jira (plugin da TOTVS), que grava flag + classificação + comentário juntos.
+    await window.gitManager.jiraAddImpediment(key, details.classification?.value ?? 'Nenhuma das Opções', details.comment?.trim() ?? '');
+  } else {
+    // Retirar: mesma chamada do quadro do Jira.
+    try { await window.gitManager.jiraRequest(JIRA_FLAG_PATH, 'POST', { issueKeys: [key], flag: false }); }
+    catch (cause) {
+      if (!/HTTP (400|404|405)/.test((cause as Error).message)) throw cause;
+      const current = (await window.gitManager.jiraRequest(`${issuePath(key)}?fields=${id}`) as { fields: Record<string, unknown> }).fields[id];
+      const kept = ((Array.isArray(current) ? current : []) as { value?: string }[]).filter(item => !/imped/i.test(item?.value ?? ''));
+      await window.gitManager.jiraRequest(issuePath(key), 'PUT', { fields: { [id]: kept.map(item => ({ value: item.value })) } });
+    }
   }
   // O Jira pode demorar um instante para refletir a mudança: confere algumas vezes antes de acusar falha.
   let now = await fetchFlagged(key);
   for (let attempt = 0; attempt < 3 && now !== flag; attempt++) { await new Promise(resolve => setTimeout(resolve, 800)); now = await fetchFlagged(key); }
   if (now !== flag) throw new Error(`O Jira não ${flag ? 'colocou' : 'removeu'} o red flag. Faça direto no Jira (menu da tarefa).`);
-  if (flag && details.classification) {
-    try {
-      const classId = await classFieldId();
-      if (!classId) throw new Error('campo "Classificação do Impedimento" não encontrado neste Jira');
-      await window.gitManager.jiraRequest(issuePath(key), 'PUT', { fields: { [classId]: { value: details.classification.value } } });
-    } catch (cause) { throw new Error(`O red flag foi colocado, mas a classificação não foi gravada: ${(cause as Error).message}`); }
-  }
 }
 export const fetchIssueXml = (key: string): Promise<string> => window.gitManager.jiraRequestText(`/si/jira.issueviews:issue-xml/${key}/${key}.xml`);
