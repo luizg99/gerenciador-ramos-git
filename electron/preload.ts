@@ -66,6 +66,7 @@ const api: Api = {
   openReviewLink: url => call('reviews:openLink', url) as Promise<void>,
   createPullRequests: (id, pairs, issue) => call('git:createPullRequests', id, pairs, issue) as ReturnType<Api['createPullRequests']>,
   pullRequestConflicts: (id, pairs) => call('git:pullRequestConflicts', id, pairs) as ReturnType<Api['pullRequestConflicts']>,
+  prBranchInfo: (id, pairs) => call('git:prBranchInfo', id, pairs) as ReturnType<Api['prBranchInfo']>,
   findPullRequests: (id, pairs) => call('git:findPullRequests', id, pairs) as ReturnType<Api['findPullRequests']>,
   saveReviewMessage: (id, input) => call('reviews:save', id, input) as ReturnType<Api['saveReviewMessage']>,
   copyReviewMessage: messageId => call('reviews:copy', messageId) as Promise<void>,

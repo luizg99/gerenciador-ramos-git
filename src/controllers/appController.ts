@@ -3,7 +3,7 @@ import { planSchema, targetsFromFields } from '../models/validation';
 import { formatReviewMessage, parseJiraIssue, reviewInputSchema, type ReviewMessage } from '../models/reviewMessage';
 export type Tab = 'home' | 'switch' | 'history' | 'commit' | 'cherry' | 'pr' | 'projects' | 'settings' | 'gemini' | 'jira' | 'jiraReport';
 export interface ViewModel {
-  snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; status?: Status; branches: Branch[];
+  snapshot: Snapshot; tab: Tab; busy: boolean; busyMessage: string; error: string; notice: string; pushWarning: string; status?: Status; branches: Branch[];
   switchTarget: string; switchMode: SwitchMode; historyRef: string; history: Commit[];
   tortoiseLocked: boolean; tortoiseOpened: boolean;
   source: string; sourceCommits: Commit[]; selectedCommits: string[]; targets: string[]; review: boolean;
@@ -28,7 +28,7 @@ export class AppController {
   private prLoadToken = 0;
   private prSourcesVersion = 0;
   private state: ViewModel = {
-    snapshot: { settings: { roots: [] }, repositories: [], executions: [] }, tab: 'switch', busy: false, busyMessage: '', error: '', notice: '', branches: [],
+    snapshot: { settings: { roots: [] }, repositories: [], executions: [] }, tab: 'switch', busy: false, busyMessage: '', error: '', notice: '', pushWarning: '', branches: [],
     switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, tortoiseOpened: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
     progress: [], manualConfirmed: false, loadingRepository: false, loadingHistory: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
@@ -180,7 +180,13 @@ export class AppController {
     void this.loadInBackground();
   });
   openJiraTokenSettings = () => this.selectTab('settings');
-  selectTab = (tab: Tab) => { this.set({ tab }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
+  // Avisa quando o usuário sai de "Alterações e commit" com commits ainda sem push; voltar para a aba (ou fechar o aviso) limpa.
+  private pendingPushWarning(tab: Tab): string {
+    const status = this.state.status;
+    if (this.state.tab !== 'commit' || tab === 'commit' || !status || status.ahead <= 0) return '';
+    return `Há ${status.ahead} ${status.ahead === 1 ? 'commit' : 'commits'} com push pendente em ${status.branch}. Envie antes de continuar para não esquecer.`;
+  }
+  selectTab = (tab: Tab) => { this.set({ tab, pushWarning: this.pendingPushWarning(tab) }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
   // No cherry-pick, a origem já começa no ramo atual; o usuário pode trocar.
   private prefillSource() {
     const branch = this.state.status?.branch;

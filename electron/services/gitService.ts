@@ -218,6 +218,22 @@ export class GitService {
     const messages = await this.git(repo, ['log', '--reverse', '--format=%B%x00', `${to}..${from}`, '--']);
     return messages.split('\0').map(message => message.trim()).filter(Boolean).map(message => `- ${message.replace(/\n/g, '\n  ')}`).join('\n\n');
   }
+  // Para cada par: o ramo de origem existe (no remoto, só local ou em lugar nenhum) e quantos commits ele tem que o destino não tem.
+  async prBranchInfo(repo: string, remote: string, pairs: { source: string; target: string }[]) {
+    const exists = (name: string) => this.git(repo, ['rev-parse', '--verify', '--quiet', `${name}^{commit}`]).then(() => true).catch(() => false);
+    const refOf = async (name: string) => {
+      if (await exists(`refs/remotes/${remote}/${name}`)) return { state: 'remote' as const, ref: `refs/remotes/${remote}/${name}` };
+      if (await exists(`refs/heads/${name}`)) return { state: 'local' as const, ref: `refs/heads/${name}` };
+      return { state: 'none' as const, ref: '' };
+    };
+    return Promise.all(pairs.map(async ({ source, target }) => {
+      ref.parse(source); ref.parse(target);
+      const [from, to] = await Promise.all([refOf(source), refOf(target)]);
+      let ahead: number | null = null;
+      if (from.state !== 'none' && to.state !== 'none') ahead = Number((await this.git(repo, ['rev-list', '--count', `${to.ref}..${from.ref}`, '--']).catch(() => '')).trim()) || 0;
+      return { source, target, sourceState: from.state, targetState: to.state, ahead };
+    }));
+  }
   // Valida todos os pares antes de devolver qualquer link: ou abre todos, ou nenhum.
   async pullRequestUrls(repo: string, pairs: { source: string; target: string }[]) {
     if (!pairs.length || pairs.length > 4) throw new Error('Informe de 1 a 4 pull requests.');

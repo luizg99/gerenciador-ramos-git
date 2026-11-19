@@ -136,6 +136,11 @@ function registerIpc() {
     catch { result.error = [result.error, 'Os PRs foram obtidos, mas não foi possível salvar o histórico. Os links continuam disponíveis nesta tela.'].filter(Boolean).join('\n'); }
     return { ...result, message };
   }));
+  handle('git:prBranchInfo', z.tuple([id, prPairsSchema]), (id, pairs) => controller.exclusive(async () => {
+    const repo = controller.repository(id);
+    const info = await controller.git.pullRequestInfo(repo);
+    return controller.git.prBranchInfo(repo, info.remote ?? 'origin', pairs);
+  }));
   handle('git:findPullRequests', z.tuple([id, prPairsSchema]), (id, pairs) => controller.exclusive(async () => {
     const repo = controller.repository(id);
     return new AzurePullRequests().find(repo, await controller.git.pullRequestInfo(repo), pairs);

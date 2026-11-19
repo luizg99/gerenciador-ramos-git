@@ -81,6 +81,7 @@ export interface Api {
   updateReviewIssue(messageId: string, issue: string): Promise<ReviewMessage>;
   openReviewLink(url: string): Promise<void>;
   pullRequestConflicts(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; state: 'conflicts' | 'ok' | 'checking' | 'unknown' | 'none'; url?: string }[]>;
+  prBranchInfo(id: string, pairs: { source: string; target: string }[]): Promise<import('./prBranch').PrBranchInfo[]>;
   findPullRequests(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; url: string }[]>;
   saveReviewMessage(id: string, input: ReviewInput): Promise<ReviewMessage>;
   copyReviewMessage(messageId: string): Promise<void>;

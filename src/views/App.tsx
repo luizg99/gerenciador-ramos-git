@@ -6,6 +6,9 @@ import { greeting, parseJiraIssue, prLabel, type ReviewMessage } from '../models
 import { Gemini } from './Gemini';
 import { Jira } from './Jira';
 import { Home } from './Home';
+import { MyTasksPicker } from './MyTasksPicker';
+import { prBranchProblem, type PrBranchInfo } from '../models/prBranch';
+import { JIRA_BASE } from '../models/jira';
 import { JiraReport } from './JiraReport';
 import packageJson from '../../package.json';
 import { BranchPicker, CommitList } from './components';
@@ -104,13 +107,14 @@ export function App({ controller: c }: { controller: AppController }) {
   const repo = c.repository;
   return <div className="app-shell">
     <aside className="sidebar">
-      <nav>{navigation.filter(item => item.tab === 'home' ? c.useJira : item.tab === 'gemini' ? c.useGemini : (item.tab === 'jira' || item.tab === 'jiraReport') ? c.useJira : item.tab === 'pr' ? c.useAzure : true).map(item => <button key={item.tab} aria-label={item.label} disabled={(item.tab !== 'home' && item.tab !== 'gemini' && item.tab !== 'jira' && item.tab !== 'jiraReport' && !repo) || vm.busy} className={[vm.tab === item.tab ? 'selected' : '', item.tab === 'gemini' ? 'gemini-nav' : '', item.tab === 'jira' ? 'jira-nav' : ''].join(' ')} onClick={() => c.selectTab(item.tab)}><span aria-hidden="true">{item.icon}</span>{item.label}{item.tab === 'commit' && !!vm.status?.files.length && <b>{vm.status.files.length}</b>}</button>)}</nav>
+      <nav>{navigation.filter(item => item.tab === 'home' ? c.useJira : item.tab === 'gemini' ? c.useGemini : (item.tab === 'jira' || item.tab === 'jiraReport') ? c.useJira : item.tab === 'pr' ? c.useAzure : true).map(item => <button key={item.tab} aria-label={item.label} disabled={(item.tab !== 'home' && item.tab !== 'gemini' && item.tab !== 'jira' && item.tab !== 'jiraReport' && !repo) || vm.busy} className={[vm.tab === item.tab ? 'selected' : '', item.tab === 'gemini' ? 'gemini-nav' : '', item.tab === 'jira' ? 'jira-nav' : '', item.tab === 'commit' && (vm.status?.ahead ?? 0) > 0 ? 'push-pending' : ''].join(' ')} title={item.tab === 'commit' && (vm.status?.ahead ?? 0) > 0 ? `Push pendente: ${vm.status?.ahead} ${vm.status?.ahead === 1 ? 'commit' : 'commits'} para enviar` : undefined} onClick={() => c.selectTab(item.tab)}><span aria-hidden="true">{item.icon}</span>{item.label}{item.tab === 'commit' && !!vm.status?.files.length && <b>{vm.status.files.length}</b>}</button>)}</nav>
       <button className={`settings-link ${vm.tab === 'settings' ? 'selected' : ''}`} onClick={() => c.selectTab('settings')} disabled={vm.busy}>⚙ Configurações</button><div className="sidebar-footer"><ThemePicker c={c} disabled={vm.busy}/><span>v{packageJson.version}</span></div>
     </aside>
     <main>{!['jira', 'gemini'].includes(vm.tab) && <header className="topbar"><div className="topbar-title"><BranchSwitcher c={c} vm={vm}/>{repo && vm.loadingRepository && <span className="loading-hint"><span className="spinner"/>Carregando projeto…</span>}</div><ProjectSwitcher c={c} vm={vm}/><div className="topbar-right"><button className="quiet" disabled={!repo || vm.busy} onClick={c.refresh} title="Relê o estado do repositório e busca os ramos novos do remoto (git fetch --all --prune)">↻ Atualizar</button>{repo && vm.tab !== 'projects' && <button className="quiet" disabled={vm.busy || !vm.status || vm.status.branch.startsWith('(')} onClick={c.fetch} title={`Busca apenas ${vm.status?.upstream ?? vm.status?.branch ?? 'o ramo atual'} no servidor (git fetch)`}>⇣ Buscar da {vm.status?.upstream?.split('/').slice(1).join('/') || vm.status?.branch || 'ramo atual'}</button>}</div></header>}
       <div className="page-scroll"><div className="page"><div className="page-heading"><div className="page-heading-top"><h1>{vm.tab === 'projects' ? 'Seus projetos' : vm.tab === 'settings' ? 'Configurações' : navigation.find(n => n.tab === vm.tab)?.label}</h1>{vm.tab === 'projects' && <button type="button" className="primary" disabled={vm.busy} onClick={() => setCloneOpen(true)}>＋ Clonar repositório</button>}</div><p>{({ home: 'Suas tarefas do Jira por status, com as sub-tarefas em cascata.', settings: 'Preferências lembradas neste computador.', projects: 'Escolha um projeto para começar ou gerencie as pastas onde eles ficam.', switch: `Pesquise um ramo para trocar ou digite um nome novo para criar.${c.usePman ? ' As dependências são instaladas em seguida, se a opção estiver marcada.' : ''}`, history: 'Navegue pelos commits e veja o que mudou em cada um.', commit: 'Acompanha as alterações pendentes e abre o commit no TortoiseGit.', cherry: 'Leve commits de um ramo para até três destinos, em sequência.', pr: 'Crie os pull requests no Azure com as mensagens dos commits na descrição.', gemini: 'Prepare a documentação da entrega com o Gem da equipe.', jira: 'Revise e execute o encerramento das tarefas no Jira.', jiraReport: 'Acompanhe o que cada pessoa da squad já concluiu no Jira.' })[vm.tab]}</p></div>
       {vm.error && <div className="alert error" role="alert"><strong>Não foi possível concluir</strong><p>{vm.error}</p><button onClick={() => c.set({ error: '' })}>Fechar</button></div>}
       {vm.notice && <div className="alert success" role="status">{vm.notice}</div>}
+      <PushWarningDialog c={c} message={vm.pushWarning}/>
       {vm.busy && <div className="running" role="status"><span className="spinner"/> {vm.busyMessage || 'Carregando...'}</div>}
       {vm.status?.operation && <div className="alert error">Operação Git em andamento: {vm.status.operation}. Resolva ou cancele antes de continuar. <button onClick={c.cancelOperation} disabled={vm.busy}>Cancelar operação</button></div>}
       <div hidden={vm.tab !== 'jira'}><Jira active={vm.tab === 'jira'} openSettings={c.openJiraTokenSettings}/></div><fieldset className="page-content" disabled={vm.busy}>{vm.tab === 'projects' ? <Projects c={c} vm={vm}/> : vm.tab === 'settings' ? <Settings c={c} vm={vm}/> : vm.tab === 'gemini' ? <Gemini/> : vm.tab === 'home' ? <Home c={c}/> : vm.tab === 'jira' ? null : vm.tab === 'jiraReport' ? <JiraReport initialSquad={vm.snapshot.settings.ui?.jiraSquad} initialIgnored={vm.snapshot.settings.ui?.jiraIgnored} save={c.saveJiraSquad} initialPeriod={vm.snapshot.settings.ui} savePeriod={c.saveJiraPeriod}/> : !repo ? vm.busy || vm.loadingRepository ? null : <div className="empty"><h2>Selecione um projeto</h2><button onClick={c.chooseRoot}>Adicionar pasta de projetos</button></div> : vm.tab === 'switch' ? <Switch c={c} vm={vm}/> : vm.tab === 'history' ? <History c={c} vm={vm}/> : vm.tab === 'commit' ? <Changes c={c} vm={vm}/> : vm.tab === 'cherry' ? <Cherry c={c} vm={vm}/> : <PullRequest c={c} vm={vm}/>}</fieldset>{vm.tab === 'projects' && cloneOpen && <CloneDialog c={c} vm={vm} onClose={() => setCloneOpen(false)}/>}
@@ -270,6 +274,18 @@ function Switch({ c, vm }: Props) {
 function PullRequest({ c, vm }: Props) {
   const confirmationDialog = useRef<HTMLDialogElement>(null);
   const jiraInput = useRef<HTMLInputElement>(null);
+  // Verifica os ramos (existem? têm commits que o destino não tem?) sempre que origem/destino mudam ou os ramos do remoto são atualizados.
+  const [branchInfos, setBranchInfos] = useState<Record<string, PrBranchInfo>>({});
+  const remoteName = vm.prInfo?.remote;
+  const shortName = (value: string) => remoteName && value.startsWith(remoteName + '/') ? value.slice(remoteName.length + 1) : value;
+  const wantedPairs = JSON.stringify((vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }]).map(row => [shortName(row.source.trim()), shortName(row.target.trim())]).filter(([source, target]) => source && target && source !== target).slice(0, 4));
+  useEffect(() => {
+    const pairs = (JSON.parse(wantedPairs) as string[][]).map(([source, target]) => ({ source, target }));
+    if (!pairs.length || !vm.prInfo?.webUrl) { setBranchInfos({}); return; }
+    let alive = true;
+    const timer = setTimeout(() => { try { void window.gitManager.prBranchInfo(c.id, pairs).then(found => { if (alive) setBranchInfos(Object.fromEntries(found.map(item => [`${item.source}→${item.target}`, item]))); }).catch(() => { if (alive) setBranchInfos({}); }); } catch { /* sem projeto selecionado */ } }, 350);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [wantedPairs, vm.branches, vm.prInfo?.webUrl]);
   const create = () => {
     if (!vm.jiraIssue.trim() || vm.dynamicPr && skippedRows > 0) confirmationDialog.current?.showModal();
     else void c.createPullRequests();
@@ -282,8 +298,9 @@ function PullRequest({ c, vm }: Props) {
   const published = (name: string) => !!name && remoteNames.has(`${info.remote}/${name}`);
   const check = (rawSource: string, rawTarget: string) => {
     const [source, target] = [short(rawSource.trim()), short(rawTarget.trim())];
-    const error = !source || !target ? '' : source === target ? 'Origem e destino precisam ser diferentes.' : !published(source) ? `O ramo ${source} ainda não está no remoto.` : !published(target) ? `O destino ${target} não existe no remoto.` : '';
-    return { source, target, error, ready: !!source && !!target && !error };
+    const problem = prBranchProblem(branchInfos[`${source}→${target}`]);
+    const error = !source || !target ? '' : source === target ? 'Origem e destino precisam ser diferentes.' : problem?.error ? problem.error : !published(source) ? `O ramo ${source} ainda não está no remoto${problem?.toPush ? ` (tem ${problem.toPush} ${problem.toPush === 1 ? 'commit' : 'commits'} para enviar)` : ''}.` : !published(target) ? `O destino ${target} não existe no remoto.` : '';
+    return { source, target, error, canPush: !problem?.error, ready: !!source && !!target && !error };
   };
   const single = check(vm.prSource, vm.prTarget);
   const rows = vm.prRows.map(row => check(row.source, row.target));
@@ -317,14 +334,15 @@ function PullRequest({ c, vm }: Props) {
       {vm.prRows.length < 4 && <button className="quiet add-row" onClick={c.addPrRow}>+ Adicionar pull request</button>}
     </div> : <>
       <div className="pr-fields"><BranchPicker label="Origem (seu ramo)" value={vm.prSource} branches={vm.branches} onChange={prSource => c.setSinglePr({ prSource })}/><span className="pr-arrow" aria-hidden="true">→</span><BranchPicker label="Destino" value={vm.prTarget} branches={vm.branches} onChange={prTarget => c.setSinglePr({ prTarget })}/></div>
-      {single.source && !published(single.source) && <div className="create-branch"><p>O ramo <code>{single.source}</code> ainda não está no remoto. Envie-o antes de abrir o pull request.</p>{single.source === vm.status?.branch ? <button onClick={c.push}>↑ Enviar {single.source} para o remoto</button> : <p className="hint">Troque para esse ramo e use “Enviar”, ou escolha um ramo já publicado.</p>}</div>}
+      {single.source && !published(single.source) && <div className="create-branch"><p>{single.error || <>O ramo <code>{single.source}</code> ainda não está no remoto. Envie-o antes de abrir o pull request.</>}</p>{!single.canPush ? null : single.source === vm.status?.branch ? <button onClick={c.push}>↑ Enviar {single.source} para o remoto</button> : <p className="hint">Troque para esse ramo e use “Enviar”, ou escolha um ramo já publicado.</p>}</div>}
       {single.source && single.target && single.source === single.target && <p className="inline-warning">Origem e destino precisam ser diferentes.</p>}
     </>}
     <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
+    {c.useJira && <MyTasksPicker disabled={vm.busy} onPick={key => c.set({ jiraIssue: `${JIRA_BASE}/browse/${key}` })}/>}
     <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição inclui as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages). O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
       {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
         : <button className="primary" disabled={!single.ready} onClick={create}>Criar pull request no Azure</button>}</div>
-  </section><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
+  </section><PrConflicts c={c} vm={vm}/><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
 }
 function ReviewComposer({ c, vm }: Props) {
   const preview = c.reviewPreview;
@@ -334,9 +352,17 @@ function ReviewComposer({ c, vm }: Props) {
   return <section className="card review-composer">
     <div className="card-heading"><div><h2>Mensagem para revisão</h2><p className="hint">Depois de criar os PRs no Azure, os links são consultados pela origem e pelo destino.</p></div><button disabled={!!issueError || !pairs.length} onClick={c.findPullRequests}>Buscar PRs e gerar mensagem</button></div>
     {issueError && <p className="inline-warning padded">{issueError}</p>}
-    {vm.prConflicts.length > 0 && <div className="pr-conflicts padded" aria-label="Conflitos nos PRs"><div className="pr-conflicts-head"><strong>Conflitos nos PRs</strong><button type="button" className="quiet" onClick={() => void c.checkConflicts(1)}>↻ Verificar de novo</button></div>
-      {vm.prConflicts.map(item => <p key={item.url} className={`pr-conflict ${item.state}`}><span className="pr-conflict-badge">{item.state === 'conflicts' ? '⚠ Com conflito' : item.state === 'ok' ? '✓ Sem conflito' : item.state === 'checking' ? '… Verificando' : item.state === 'none' ? '– PR não está mais ativo' : '? Não foi possível verificar agora'}</span> {item.source} → {item.target} · <ReviewLink c={c} url={item.url} label={prLabel(item.url)}/></p>)}</div>}
     {preview ? <><div className="review-message" aria-label="Prévia da mensagem"><p>{greeting()}, tarefa finalizada, disponível para revisão.</p>{preview.issue && <p>Issue do Jira:<br/><ReviewLink c={c} url={preview.issue.url} label={preview.issue.key}/></p>}<p>PRs:</p>{preview.prs.map(pr => <p key={pr.url}>{pr.target}: <ReviewLink c={c} url={pr.url} label={prLabel(pr.url)}/></p>)}</div><div className="card-actions"><p className="hint">Cole com Ctrl+V para manter os códigos do Jira e dos PRs como links. A saudação usa o horário local no momento da cópia.</p><button className="primary" onClick={c.copyReview}>Copiar mensagem</button></div></> : <p className="hint padded">Os links finais e o texto aparecerão aqui. Sem Issue Jira, a mensagem terá a saudação e a lista de PRs.</p>}
+  </section>;
+}
+// Conflitos dos PRs recém-criados: cartão próprio, acima da "Mensagem para revisão".
+function PrConflicts({ c, vm }: Props) {
+  if (!vm.prConflicts.length) return null;
+  const label = (state: string) => state === 'conflicts' ? '⚠ Com conflito' : state === 'ok' ? '✓ Sem conflito' : state === 'checking' ? '… Verificando' : state === 'none' ? '– PR não está mais ativo' : '? Não foi possível verificar agora';
+  const conflicts = vm.prConflicts.filter(item => item.state === 'conflicts').length;
+  return <section className="card pr-conflicts-card" aria-label="Conflitos nos PRs">
+    <div className="card-heading"><div><h2>Conflitos nos PRs</h2><p className="hint">{conflicts ? `${conflicts} ${conflicts === 1 ? 'PR tem' : 'PRs têm'} conflito — resolva antes de pedir a revisão.` : 'O Azure calcula o merge em segundo plano; a verificação se repete sozinha por alguns segundos.'}</p></div><button type="button" className="quiet" onClick={() => void c.checkConflicts(1)}>↻ Verificar de novo</button></div>
+    <div className="pr-conflict-list">{vm.prConflicts.map(item => <p key={item.url} className={`pr-conflict ${item.state}`}><span className="pr-conflict-badge">{label(item.state)}</span><span className="pr-conflict-pair">{item.source} → {item.target}</span><ReviewLink c={c} url={item.url} label={prLabel(item.url)}/></p>)}</div>
   </section>;
 }
 function ReviewLink({ c, url, label }: { c: AppController; url: string; label?: string }) {
@@ -487,4 +513,19 @@ function JiraTokenSetting() {
     {state && <p className={state.kind === 'error' ? 'inline-warning' : 'hint'} role={state.kind === 'error' ? 'alert' : 'status'}>{state.text}</p>}
     <p className="hint">Guardado criptografado pelo Windows, só neste computador. Para gerar: Jira → seu perfil → Tokens de acesso pessoal.</p>
   </div></div>;
+}
+
+// Pop-up de push pendente: aparece quando o usuário sai de "Alterações e commit" com commits ainda sem push.
+function PushWarningDialog({ c, message }: { c: AppController; message: string }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current; if (!element) return;
+    if (message && !element.open) element.showModal();
+    else if (!message && element.open) element.close();
+  }, [message]);
+  return <dialog ref={dialog} className="issue-dialog push-dialog" aria-labelledby="push-title" onCancel={event => { event.preventDefault(); c.set({ pushWarning: '' }); }}>
+    <h2 id="push-title"><span aria-hidden="true">⚠</span> Push pendente</h2>
+    <p>{message}</p>
+    <div className="card-actions"><button onClick={() => c.set({ pushWarning: '' })}>Entendi</button><button className="primary" autoFocus onClick={() => c.selectTab('commit')}>Voltar para Alterações e commit</button></div>
+  </dialog>;
 }
