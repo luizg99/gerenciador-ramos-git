@@ -45,6 +45,8 @@ export function Home({ c }: { c: AppController }) {
   const [sprint, setSprint] = useState<string | null>(chosenSprint);
   const [menu, setMenu] = useState<{ x: number; y: number; key: string; depth: number } | null>(null);
   const [progressTick, setProgressTick] = useState(0);
+  // Com token do Jira nas Configurações o login não é necessário: o botão "fazer login" só aparece sem token (null = ainda checando).
+  const [viaToken, setViaToken] = useState<boolean | null>(null);
   const [flagging, setFlagging] = useState<{ key: string } | null>(null);
   const [flagClass, setFlagClass] = useState<string>(IMPEDIMENT_CLASSES[0].id);
   const [flagComment, setFlagComment] = useState('');
@@ -147,6 +149,7 @@ export function Home({ c }: { c: AppController }) {
   const load = async () => {
     const token = ++run.current;
     setLoading(true); setError(''); failed.current = false;
+    void window.gitManager.jiraTokenStatus().then(status => setViaToken(status === 'ok')).catch(() => setViaToken(false));
     try {
       const board = await fetchMyBoard();
       if (token !== run.current) return;
@@ -196,7 +199,7 @@ export function Home({ c }: { c: AppController }) {
       </> : progress.error ? <p className="sprint-note">Não foi possível calcular o progresso da sprint: {progress.error}</p> : <p className="sprint-note">Calculando o progresso da sprint…</p>}
     </section>}
     {moveError && <div className="alert error" role="alert"><strong>Status não alterado</strong><p>{moveError}</p><button onClick={() => setMoveError('')}>Fechar</button></div>}
-    {error && <div className="alert error" role="alert"><strong>Não foi possível carregar suas tarefas</strong><p>{error}</p><div className="kanban-error-actions"><button onClick={() => void load()}>Tentar de novo</button><button onClick={() => c.selectTab('jira')}>Abrir o Jira para fazer login</button></div></div>}
+    {error && <div className="alert error" role="alert"><strong>Não foi possível carregar suas tarefas</strong><p>{error}</p><div className="kanban-error-actions"><button onClick={() => void load()}>Tentar de novo</button>{viaToken === false && <button onClick={() => c.selectTab('jira')}>Abrir o Jira para fazer login</button>}</div></div>}
     {shown && !hasCards(shown) && !error && <p className="kanban-empty-note">{effective ? 'Nenhuma tarefa sua nessa sprint.' : 'Nenhuma tarefa em aberto atribuída a você.'}</p>}
     {!!shown?.length && <div className="kanban-columns" ref={columnsRef} onDragOver={event => {
       // Arrastando um cartão perto da borda, a lista de colunas rola sozinha para dar para chegar às colunas fora da tela.

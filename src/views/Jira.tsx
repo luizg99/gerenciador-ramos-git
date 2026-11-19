@@ -31,11 +31,21 @@ const withDate = (dateValue: string, dateTimeValue: string) => {
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('pt-BR') : '';
 
 // memo: a tela do Jira fica sempre montada; sem isso, cada tecla digitada em outra aba a redesenhava inteira.
-export const Jira = memo(function Jira({ active = true }: { active?: boolean }) {
+// Depois de abrir as Configurações, espera o campo do token aparecer (a tela troca de forma assíncrona) e põe o foco nele.
+function focusTokenField() {
+  let tries = 0;
+  const attempt = () => {
+    const field = document.getElementById('jira-token-input') as HTMLInputElement | null;
+    if (field && field.offsetParent !== null) { field.scrollIntoView({ block: 'center' }); field.focus(); return; }
+    if (++tries < 40) setTimeout(attempt, 50);
+  };
+  setTimeout(attempt, 50);
+}
+export const Jira = memo(function Jira({ active = true, openSettings }: { active?: boolean; openSettings?: () => void }) {
   const [generation, setGeneration] = useState(0);
-  return <JiraForm key={generation} active={active} clear={() => setGeneration(value => value + 1)}/>;
+  return <JiraForm key={generation} active={active} openSettings={openSettings} clear={() => setGeneration(value => value + 1)}/>;
 });
-function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
+function JiraForm({ active, clear, openSettings }: { active: boolean; clear: () => void; openSettings?: () => void }) {
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [key, setKey] = useState('');
   // Filtro "Minhas tarefas": lista as tarefas atribuídas ao usuário logado; clicar em uma carrega o fluxo dela.
@@ -77,6 +87,9 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   const [confirm, setConfirm] = useState(false);
   const [browserState, setBrowserState] = useState<JiraBrowserState>({ phase: 'loading', message: 'Abrindo Jira…' });
   const [expanded, setExpanded] = useState(false);
+  // Com token do Jira nas Configurações o app não precisa do login: o painel do site some e o fluxo ocupa a tela toda.
+  const [viaToken, setViaToken] = useState(false);
+  useEffect(() => { if (active) void window.gitManager.jiraTokenStatus().then(status => setViaToken(status === 'ok')).catch(() => setViaToken(false)); }, [active]);
   const browser = useRef<HTMLDivElement>(null);
   const reposition = useRef<() => void>(() => {});
   const assigned = related.filter(issue => roles[issue.key]);
@@ -93,6 +106,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
   }, []);
   useEffect(() => {
     if (!active) return;
+    if (viaToken) { void window.gitManager.jiraView(null).catch(() => {}); return; }
     let frame = 0, last = '';
     const resize = () => {
       cancelAnimationFrame(frame);
@@ -108,7 +122,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
     if (browser.current) observer.observe(browser.current);
     observer.observe(document.body); addEventListener('resize', resize); addEventListener('scroll', resize, true); resize();
     return () => { reposition.current = () => {}; cancelAnimationFrame(frame); observer.disconnect(); removeEventListener('resize', resize); removeEventListener('scroll', resize, true); void window.gitManager.jiraView(null).catch(() => {}); };
-  }, [active]);
+  }, [active, viaToken]);
   const request = async <T,>(path: string, method: JiraMethod = 'GET', body?: unknown) => await window.gitManager.jiraRequest(path, method, body) as T;
   const action = async (work: () => Promise<void>) => {
     setBusy(true); setError(''); setNotice('');
@@ -447,7 +461,9 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
       </div>}
     </div>;
   };
-  return <section className={`jira-layout ${expanded ? 'expanded' : ''}`}>
+  return <>
+  {!viaToken && openSettings && <div className="jira-token-banner" role="alert"><span className="jira-token-banner-icon" aria-hidden="true">⚠</span><strong>Para sumir a tela do Jira, configure seu token em Configurações.</strong><button type="button" onClick={() => { openSettings(); focusTokenField(); }}>Configurar token agora</button></div>}
+  <section className={`jira-layout ${expanded || viaToken ? 'expanded' : ''}`}>
     {!expanded && <section className="card jira-workflow">
       <div className="card-heading"><div><span className="step-label">ENTREGA · JIRA</span><h2>Encerramento de desenvolvimento</h2><p>Prepare a documentação, confira os tempos e revise a entrega.</p></div><button className="quiet" onClick={() => setExpanded(true)}>Ampliar Jira</button></div>
       <div className="jira-workflow-scroll">
@@ -473,7 +489,7 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
             })()}
           </div>}
         </div>
-        <p className="hint">A sessão é independente da autenticação Git. Faça login no painel Jira ao lado antes de carregar uma tarefa.</p>
+        <p className="hint">{viaToken ? 'Usando o token do Jira das Configurações: não precisa de login.' : 'A sessão é independente da autenticação Git. Faça login no painel Jira ao lado antes de carregar uma tarefa.'}</p>
         {error && <div className="alert error" role="alert">{error}<button onClick={() => setError('')}>Fechar</button></div>}
         {notice && <div className="alert success" role="status">{notice}</div>}
         {impeded && !busy && <div className="jira-impeded" role="alert"><span aria-hidden="true">⚑</span><h3>Tarefa impedida</h3><p><strong>{impeded.key}</strong>{impeded.summary ? ` — ${impeded.summary}` : ''}</p><p>Essa tarefa está impedida retire o impedimento para prosseguir.</p><button className="primary" onClick={() => void releaseImpediment()}>Retirar impedimento e recarregar</button><small>Se você já retirou o impedimento no Jira, o botão apenas recarrega a tarefa.</small></div>}
@@ -537,8 +553,9 @@ function JiraForm({ active, clear }: { active: boolean; clear: () => void }) {
         </>}
       </div>
     </section>}
-    <section className="card jira-browser"><div className="card-heading"><div><h2>Jira da equipe</h2><p>{browserState.message}</p></div><div><button className="quiet" disabled={busy} onClick={() => void browserAction(() => window.gitManager.jiraOpen())}>Abrir Jira</button>{expanded && <button className="quiet" onClick={() => setExpanded(false)}>Mostrar fluxo</button>}</div></div><p className="jira-browser-address" title={browserState.url}>{browserState.url ?? JIRA_BASE}</p><div ref={browser} className="jira-browser-surface" aria-label="Sessão do Jira"/></section>
-  </section>;
+    {!viaToken && <section className="card jira-browser"><div className="card-heading"><div><h2>Jira da equipe</h2><p>{browserState.message}</p></div><div><button className="quiet" disabled={busy} onClick={() => void browserAction(() => window.gitManager.jiraOpen())}>Abrir Jira</button>{expanded && <button className="quiet" onClick={() => setExpanded(false)}>Mostrar fluxo</button>}</div></div><p className="jira-browser-address" title={browserState.url}>{browserState.url ?? JIRA_BASE}</p><div ref={browser} className="jira-browser-surface" aria-label="Sessão do Jira"/></section>}
+  </section>
+  </>;
 }
 
 function issueTypeLabel(meta: CreateMeta | undefined, typeId: string) {

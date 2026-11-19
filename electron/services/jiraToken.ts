@@ -38,7 +38,7 @@ export async function jiraTokenRequest(token: string, requestPath: string, metho
   try {
     response = await net.fetch(`${JIRA_BASE}${requestPath}`, {
       method, redirect: 'manual', signal: AbortSignal.timeout(45000),
-      headers: { Authorization: `Bearer ${token}`, Accept: asText ? 'application/xml,text/xml,*/*' : 'application/json', 'Content-Type': 'application/json', 'X-Atlassian-Token': 'no-check' },
+      headers: { Authorization: `Bearer ${token}`, Accept: asText ? 'application/xml,text/xml,*/*' : 'application/json', 'Content-Type': 'application/json', 'X-Atlassian-Token': 'no-check', Origin: JIRA_BASE }, // sem o Origin o anti-CSRF do Jira recusa os POST ("XSRF check failed")
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   } catch { throw new Error('Não foi possível falar com o Jira pelo token. Verifique a conexão.'); }

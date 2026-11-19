@@ -179,6 +179,7 @@ export class AppController {
     this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prConflicts: [], prSource: '', prTarget: '', branchRows: emptyBranchRows(this.savedBranchBases()), switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
+  openJiraTokenSettings = () => this.selectTab('settings');
   selectTab = (tab: Tab) => { this.set({ tab }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
   // No cherry-pick, a origem já começa no ramo atual; o usuário pode trocar.
   private prefillSource() {
