@@ -392,6 +392,7 @@ function Settings({ c, vm }: Props) {
       <label className="setting-row"><input type="checkbox" checked={c.usePman} onChange={e => c.setUsePman(e.target.checked)}/><div><strong>Usa pman</strong><p>Ao trocar ou criar ramo em <em>Criar / Alterar ramo</em>, exclui <code>source/lib</code> permanentemente e executa <code>pman install -f</code> em <code>source</code>. O botão manual segue a mesma ordem. Desligado, o pman nunca é executado.</p></div></label>
       <label className="setting-row"><input type="checkbox" checked={c.useAzure} onChange={e => c.setUseAzure(e.target.checked)}/><div><strong>Usa Azure</strong><p>Mostra o menu Criar pull request.</p></div></label>
       <label className="setting-row"><input type="checkbox" checked={c.useJira} onChange={e => c.setUseJira(e.target.checked)}/><div><strong>Usa Jira</strong><p>Mostra os menus Jira e Relatório jira.</p></div></label>
+      {c.useJira && <JiraTokenSetting/>}
       <label className="setting-row"><input type="checkbox" checked={c.useGemini} onChange={e => c.setUseGemini(e.target.checked)}/><div><strong>Usa GEM DEV</strong><p>Mostra o menu Gemini.</p></div></label>
     </section>
     <section className="card switch-card">
@@ -451,4 +452,38 @@ function Cherry({ c, vm }: Props) {
     {vm.review && <section ref={reviewRef} className="card review"><h2>Pronto para aplicar e enviar</h2><p><strong>{vm.selectedCommits.length} commits</strong> de <code>{vm.source}</code> serão enviados para:</p><div className="route">{vm.targets.filter(Boolean).map((t, i) => <span key={i}>{i > 0 && '→ '}<code>{t}</code></span>)}</div><div className="review-commits">{vm.sourceCommits.filter(c => vm.selectedCommits.includes(c.hash)).map(c => <p key={c.hash}><code>{c.hash.slice(0, 8)}</code> {c.subject}</p>)}</div><p className="hint">A atualização remota ocorre antes de começar. Destinos com commits locais pendentes precisam ser revisados e enviados primeiro.</p><div className="card-actions"><button onClick={() => c.set({ review: false })}>Voltar</button><button className="primary" onClick={c.execute}>Aplicar commits e fazer push</button></div></section>}
     {execution && <section ref={executionRef} className="card"><div className="card-heading"><h2>{outcome.title}</h2><div className="execution-heading-meta"><span className={`pill outcome-${outcome.tone}`}>{outcome.label}</span><small>{new Date(execution.startedAt).toLocaleString('pt-BR')}</small></div></div><p className="hint padded">Origem: {execution.source} · {execution.commits.map(h => h.slice(0, 8)).join(', ')}</p>{execution.targets.map((t, i) => <div className="execution-target" key={i}><div><span className={`phase-dot ${t.phase}`}/><strong>{t.branch}</strong><span className={`pill phase-${t.phase}`}>{({ pending: 'Não iniciado', switching: 'Trocando ramo', pman: 'Executando pman', applying: 'Aplicando commits', pushing: 'Enviando', done: 'Push concluído', failed: 'Falhou', interrupted: 'Interrompido' })[t.phase]}</span></div>{t.error && <pre className="execution-error">{t.error}</pre>}</div>)}{!execution.finished && <div className="recovery"><button onClick={c.cancelCherryPick}>Cancelar sequência</button><p className="hint">Encerra esta sequência e libera uma nova tentativa. Commits e arquivos são preservados. Conflitos ou operações ainda abertas no Git precisam ser resolvidos separadamente.</p><button onClick={() => c.resume('retry')}>{execution.targets.find(t => t.phase !== 'done')?.failedAt === 'pushing' ? 'Tentar somente o push e continuar' : 'Tentar destino novamente'}</button><label className="manual-check"><input type="checkbox" checked={vm.manualConfirmed} onChange={e => c.set({ manualConfirmed: e.target.checked })}/>Concluí o cherry-pick manualmente no destino pendente e revisei todos os commits locais que serão enviados.</label><button disabled={!vm.manualConfirmed} onClick={() => c.resume('manual')}>Enviar resultado manual e continuar</button><p className="hint">Para a conclusão manual, deixe o destino pendente selecionado no Git e sem conflitos ou arquivos alterados. Destinos já enviados serão preservados.</p></div>}</section>}
   </>;
+}
+
+// Token pessoal do Jira (opcional): com ele preenchido o app consulta o Jira pelo token e não exige mais o login da aba Jira.
+function JiraTokenSetting() {
+  const [status, setStatus] = useState<'none' | 'ok' | 'refused'>('none');
+  const configured = status !== 'none';
+  const [token, setToken] = useState('');
+  const [state, setState] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [working, setWorking] = useState(false);
+  useEffect(() => { void window.gitManager.jiraTokenStatus().then(setStatus).catch(() => setStatus('none')); }, []);
+  const save = async () => {
+    setWorking(true); setState(null);
+    try { const name = await window.gitManager.setJiraToken(token.trim()); setStatus('ok'); setToken(''); setState({ kind: 'ok', text: `Token aceito${name ? ` (${name})` : ''}. O app agora consulta o Jira pelo token.` }); }
+    catch (error) { setState({ kind: 'error', text: (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') }); }
+    finally { setWorking(false); }
+  };
+  const remove = async () => {
+    setWorking(true); setState(null);
+    try { await window.gitManager.clearJiraToken(); setStatus('none'); setState({ kind: 'ok', text: 'Token removido. O app volta a usar o login da aba Jira.' }); }
+    catch (error) { setState({ kind: 'error', text: (error as Error).message }); }
+    finally { setWorking(false); }
+  };
+  return <div className="setting-row jira-token"><div>
+    <strong>Token do Jira <small>(opcional)</small></strong>
+    {status === 'refused' && <p className="inline-warning" role="alert">O Jira recusou o token (ele pode ter vencido ou sido revogado). Enquanto isso, o app usa o login da aba Jira. Gere um novo token e cole abaixo.</p>}
+    <p>{configured ? 'Token configurado: o app usa o token e não exige login no Jira.' : 'Cole um token de acesso pessoal do Jira para não depender do login. Sem token, vale o login da aba Jira.'}</p>
+    <div className="jira-token-form">
+      <input type="password" autoComplete="off" spellCheck={false} aria-label="Token de acesso pessoal do Jira" placeholder={configured ? 'Novo token (substitui o atual)' : 'Cole o token aqui'} value={token} onChange={e => setToken(e.target.value)}/>
+      <button className="primary" disabled={working || token.trim().length < 8} onClick={() => void save()}>{working ? 'Verificando…' : 'Salvar token'}</button>
+      {configured && <button disabled={working} onClick={() => void remove()}>Remover</button>}
+    </div>
+    {state && <p className={state.kind === 'error' ? 'inline-warning' : 'hint'} role={state.kind === 'error' ? 'alert' : 'status'}>{state.text}</p>}
+    <p className="hint">Guardado criptografado pelo Windows, só neste computador. Para gerar: Jira → seu perfil → Tokens de acesso pessoal.</p>
+  </div></div>;
 }

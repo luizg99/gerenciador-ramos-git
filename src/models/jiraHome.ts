@@ -17,7 +17,7 @@ export interface HomeIssue {
     [field: string]: unknown;
   };
 }
-export interface HomeCard { key: string; summary: string; type: string; status: string; category: string; priority: string; sprint: string; sprintStart: number; mine: boolean; children: HomeCard[] }
+export interface HomeCard { key: string; summary: string; type: string; status: string; category: string; priority: string; sprint: string; sprintStart: number; mine: boolean; flagged: boolean; flagNote: string; delivery: string; children: HomeCard[] }
 // id identifica a coluna (a do quadro do Jira ou, para status fora dela, "extra:<status>"); status é o nome mostrado.
 export interface HomeColumn { id: string; status: string; category: string; cards: HomeCard[]; fixed?: boolean }
 
@@ -58,12 +58,25 @@ export function latestSprint(sprints: SprintRef[]): SprintRef | undefined {
 const toCard = (key: string, fields: HomeIssue['fields'] | NonNullable<HomeIssue['fields']['parent']>['fields'], mine: boolean, sprint?: SprintRef): HomeCard => ({
   key, summary: fields?.summary ?? '', type: fields?.issuetype?.name ?? '', status: fields?.status?.name ?? 'Sem status',
   category: fields?.status?.statusCategory?.key ?? '', priority: (fields as HomeIssue['fields'] | undefined)?.priority?.name ?? '',
-  sprint: sprint?.name ?? '', sprintStart: sprint?.start ?? 0, mine, children: []
+  sprint: sprint?.name ?? '', sprintStart: sprint?.start ?? 0, mine, flagged: false, flagNote: '', delivery: '', children: []
 });
 
-export function buildHomeBoard(issues: HomeIssue[], sprintsOf: (issue: HomeIssue) => SprintRef[] = () => []): HomeColumn[] {
+// Impedimento (red flag): classificações do campo "Classificação do Impedimento" do Jira da equipe.
+export const IMPEDIMENT_CLASSES = [
+  { id: '303245', value: 'Nenhuma das Opções' }, { id: '303239', value: 'Retorno Cliente' }, { id: '303240', value: 'Retorno Suporte' },
+  { id: '303242', value: 'Apoio/Pendência de Outro Time/Área' }, { id: '303241', value: 'Indisponibilidade/Ausência Time' },
+  { id: '303238', value: 'Problemas com Ambiente' }, { id: '303244', value: 'Dependência de Fonte' }, { id: '303243', value: 'Problemas ou Dependência de Infra' }
+] as const;
+// flagOf devolve null (sem flag) ou a descrição do impedimento (pode ser vazia).
+export function buildHomeBoard(issues: HomeIssue[], sprintsOf: (issue: HomeIssue) => SprintRef[] = () => [], flagOf: (issue: HomeIssue) => string | null = () => null, deliveryOf: (issue: HomeIssue) => string = () => ''): HomeColumn[] {
   const cards = new Map<string, HomeCard>();
-  for (const issue of issues) if (!cards.has(issue.key)) cards.set(issue.key, toCard(issue.key, issue.fields, true, latestSprint(sprintsOf(issue))));
+  for (const issue of issues) if (!cards.has(issue.key)) {
+    const card = toCard(issue.key, issue.fields, true, latestSprint(sprintsOf(issue)));
+    const note = flagOf(issue);
+    if (note !== null) { card.flagged = true; card.flagNote = note; }
+    card.delivery = deliveryOf(issue);
+    cards.set(issue.key, card);
+  }
   const roots: HomeCard[] = [];
   const seen = new Set<string>();
   const place = (key: string, card: HomeCard) => { if (!seen.has(key)) { seen.add(key); roots.push(card); } };
@@ -131,7 +144,8 @@ export function findCard(columns: HomeColumn[], key: string): HomeCard | undefin
 export interface SprintProgress { total: number; percent: number; counts: { id: string; label: string; count: number }[]; others: { status: string; count: number }[] }
 export const sprintJql = (sprint: string) => `sprint = "${sprint.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" AND issuetype in standardIssueTypes()`;
 export function summarizeSprint(issues: { fields: { status?: { name?: string }; issuetype?: { name?: string; subtask?: boolean } } }[]): SprintProgress {
-  const parents = issues.filter(issue => !issue.fields.issuetype?.subtask);
+  // Só tarefas principais, e cards de Gestão (reuniões, apontamentos, autoconhecimento…) não contam na sprint.
+  const parents = issues.filter(issue => !issue.fields.issuetype?.subtask && !/^gest[aã]o/i.test(issue.fields.issuetype?.name?.trim() ?? ''));
   const counts = BOARD_COLUMNS.map(item => ({ id: item.id as string, label: item.label as string, count: parents.filter(issue => columnIdFor(issue.fields.status?.name ?? '') === item.id).length }));
   const done = counts.find(item => item.id === 'finalizado')?.count ?? 0;
   // Status que não casam com nenhuma coluna do quadro (ex.: Cancelado, Impedido) ficam à parte, para a soma bater com o total.
@@ -139,3 +153,7 @@ export function summarizeSprint(issues: { fields: { status?: { name?: string }; 
   for (const issue of parents) { const name = issue.fields.status?.name?.trim() || 'Sem status'; if (!columnIdFor(name)) others.set(name, (others.get(name) ?? 0) + 1); }
   return { total: parents.length, percent: parents.length ? Math.round(done / parents.length * 100) : 0, counts, others: [...others].map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count) };
 }
+
+// Data Acordo Entrega: o Jira devolve AAAA-MM-DD; mostra DD/MM/AAAA. Atrasada = já passou e a tarefa ainda não terminou.
+export const formatDelivery = (iso: string): string => /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10).split('-').reverse().join('/') : '';
+export const deliveryLate = (iso: string, category: string, today = new Date()): boolean => !!category && category !== 'done' && /^\d{4}-\d{2}-\d{2}/.test(iso) && iso.slice(0, 10) < `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;

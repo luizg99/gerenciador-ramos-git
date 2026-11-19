@@ -9,6 +9,9 @@ const call = (name: string, ...args: unknown[]) => ipcRenderer.invoke(name, ...a
 const api: Api = {
   jiraView: bounds => call('jira:view', bounds) as Promise<void>,
   jiraState: () => call('jira:state') as Promise<JiraBrowserState>,
+  jiraTokenStatus: () => call('jira:tokenStatus') as Promise<'none' | 'ok' | 'refused'>,
+  setJiraToken: token => call('jira:setToken', token) as Promise<string>,
+  clearJiraToken: () => call('jira:clearToken') as Promise<void>,
   jiraOpen: () => call('jira:open') as Promise<void>,
   jiraRequestText: path => call('jira:requestText', path) as Promise<string>,
   jiraRequest: (path, method, body) => call('jira:request', path, method ?? 'GET', body) as Promise<unknown>,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NO_SPRINT, buildHomeBoard, columnIdFor, countMine, filterBySprint, findMove, hasWithoutSprint, sprintJql, sprintOptions, summarizeSprint, type HomeColumn, type HomeIssue } from '../src/models/jiraHome';
+import { NO_SPRINT, buildHomeBoard, columnIdFor, countMine, filterBySprint, findMove, hasWithoutSprint, deliveryLate, formatDelivery, sprintJql, sprintOptions, summarizeSprint, type HomeColumn, type HomeIssue } from '../src/models/jiraHome';
 import type { SprintRef } from '../src/models/jiraReport';
 
 const status = (name: string, category: string) => ({ name, statusCategory: { key: category } });
@@ -127,8 +127,28 @@ describe('progresso da sprint', () => {
     expect(columnIdFor('Comprometido')).toBe('a-fazer');
     expect(summarizeSprint([it2('Comprometido'), it2('A fazer')]).counts[0].count).toBe(2);
   });
+  it('cards do tipo Gestão não contam na sprint', () => {
+    const gestao = { fields: { status: { name: 'Comprometido' }, issuetype: { name: 'Gestão' } } };
+    const result = summarizeSprint([it2('Finalizado'), gestao, gestao]);
+    expect(result.total).toBe(1);
+    expect(result.percent).toBe(100);
+  });
   it('sprint vazia dá 0% e o nome da sprint é escapado no JQL', () => {
     expect(summarizeSprint([]).percent).toBe(0);
     expect(sprintJql('Sprint "A"')).toContain('sprint = "Sprint \\"A\\""');
+  });
+});
+
+describe('data acordo entrega', () => {
+  it('formata como DD/MM/AAAA e ignora valor inválido', () => {
+    expect(formatDelivery('2026-11-27')).toBe('27/11/2026');
+    expect(formatDelivery('')).toBe('');
+  });
+  it('só fica atrasada se já passou e a tarefa não terminou', () => {
+    const today = new Date(2026, 10, 19);
+    expect(deliveryLate('2026-11-18', 'indeterminate', today)).toBe(true);
+    expect(deliveryLate('2026-11-19', 'indeterminate', today)).toBe(false);
+    expect(deliveryLate('2026-11-01', 'done', today)).toBe(false);
+    expect(deliveryLate('2026-11-01', '', today)).toBe(false);
   });
 });

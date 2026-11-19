@@ -1,4 +1,5 @@
 import { WebContentsView, type BrowserWindow } from 'electron';
+import { getJiraToken, jiraTokenRequest, TokenRefusedError } from './jiraToken';
 import { keepLoginsAcrossRestarts } from './persistentSession';
 import { isAllowedJiraPath, isAllowedJiraXmlPath, JIRA_BASE, JIRA_HOME_URL, type JiraBounds, type JiraBrowserState, type JiraMethod } from '../../src/models/jira';
 
@@ -83,7 +84,17 @@ export class JiraBrowser {
     this.update('loading', 'Abrindo o Jira da equipe…');
     await this.ensureView().webContents.loadURL(JIRA_HOME_URL);
   }
+  // Com token nas Configurações, não depende do login da aba Jira. Se o token for recusado, tenta a sessão; se ela também não servir, mostra o erro do token.
   async request(path: string, method: JiraMethod = 'GET', body?: unknown): Promise<unknown> {
+    const token = await getJiraToken();
+    if (!token) return this.sessionRequest(path, method, body);
+    try { return await jiraTokenRequest(token, path, method, body); }
+    catch (error) {
+      if (!(error instanceof TokenRefusedError)) throw error;
+      try { return await this.sessionRequest(path, method, body); } catch { throw error; }
+    }
+  }
+  private async sessionRequest(path: string, method: JiraMethod = 'GET', body?: unknown): Promise<unknown> {
     const contents = this.ensureView().webContents;
     let url: URL;
     try { url = new URL(contents.getURL()); } catch { throw new Error('A sessão do Jira ainda está carregando.'); }
@@ -98,6 +109,15 @@ export class JiraBrowser {
   }
   // Texto puro de uma página de exportação (XML da issue), com a sessão já logada.
   async requestText(path: string): Promise<string> {
+    const token = await getJiraToken();
+    if (!token) return this.sessionRequestText(path);
+    try { return await jiraTokenRequest(token, path, 'GET', undefined, true) as string; }
+    catch (error) {
+      if (!(error instanceof TokenRefusedError)) throw error;
+      try { return await this.sessionRequestText(path); } catch { throw error; }
+    }
+  }
+  private async sessionRequestText(path: string): Promise<string> {
     const contents = this.ensureView().webContents;
     let url: URL;
     try { url = new URL(contents.getURL()); } catch { throw new Error('A sessão do Jira ainda está carregando.'); }

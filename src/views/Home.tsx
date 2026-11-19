@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppController } from '../controllers/appController';
 import { JIRA_BASE } from '../models/jira';
-import { NO_SPRINT, cardColumnId, countMine, filterBySprint, findCard, findMove, hasCards, hasWithoutSprint, moveTarget, sameStatus, sprintOptions, type HomeCard, type HomeColumn, type JiraMove, type SprintProgress } from '../models/jiraHome';
+import { IMPEDIMENT_CLASSES, NO_SPRINT, cardColumnId, deliveryLate, formatDelivery, countMine, filterBySprint, findCard, findMove, hasCards, hasWithoutSprint, moveTarget, sameStatus, sprintOptions, type HomeCard, type HomeColumn, type JiraMove, type SprintProgress } from '../models/jiraHome';
 import { cachedBoard, cachedSprintProgress, fetchFlagged, fetchIssueXml, fetchMoves, fetchSprintProgress, fetchMyBoard, moveIssue, setFlagged } from './jiraMine';
 
 // A sprint escolhida no filtro fica guardada; a última lista (cache) aparece na hora ao voltar para o Início e é atualizada por trás.
@@ -14,7 +14,7 @@ type OpenMenu = (event: React.MouseEvent, key: string, depth: number) => void;
 interface CardActions { onMenu: OpenMenu; onDrag: (key: string | null) => void; dragging: string | null }
 function Card({ card, depth = 0, actions }: { card: HomeCard; depth?: number; actions: CardActions }) {
   // Botão direito no cartão (principal ou sub-tarefa) abre o menu daquela tarefa; o clique e o arrastar não sobem para a principal.
-  return <article className={`kanban-card${card.mine ? '' : ' context'}${depth ? ' child' : ''}${actions.dragging === card.key ? ' dragging' : ''}`} draggable title="Clique com o botão esquerdo para mais opções"
+  return <article className={`kanban-card${card.mine ? '' : ' context'}${card.flagged ? ' flagged' : ''}${depth ? ' child' : ''}${actions.dragging === card.key ? ' dragging' : ''}`} draggable title="Clique com o botão esquerdo para mais opções"
     onClick={event => { event.stopPropagation(); if ((event.target as HTMLElement).closest('button, a') || window.getSelection()?.toString() || Date.now() - lastDragEnd < 400) return; actions.onMenu(event, card.key, depth); }}
     onContextMenu={event => { event.stopPropagation(); actions.onMenu(event, card.key, depth); }}
     onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('text/plain', card.key); event.dataTransfer.effectAllowed = 'move'; actions.onDrag(card.key); }}
@@ -22,9 +22,11 @@ function Card({ card, depth = 0, actions }: { card: HomeCard; depth?: number; ac
     <div className="kanban-card-top">
       <button type="button" className="kanban-key" title="Abrir no Jira" onClick={() => openIssue(card.key)}>{card.key}</button>
       {card.type && <span className="kanban-type">{card.type}</span>}
+      {card.flagged && <span className="kanban-flag" role="img" aria-label="Impedimento" title={card.flagNote ? `Impedimento: ${card.flagNote}` : 'Impedimento (sem descrição)'}>⚑</span>}
       {depth > 0 && <span className={`kanban-status cat-${card.category}`}>{card.status}</span>}
     </div>
     {card.mine && <span className={`kanban-sprint${card.sprint ? '' : ' none'}`} title="Sprint">◷ {card.sprint || 'Sem sprint'}</span>}
+    {card.delivery && formatDelivery(card.delivery) && <span className={`kanban-delivery${deliveryLate(card.delivery, card.category) ? ' late' : ''}`} title="Data Acordo Entrega">▦ Entrega {formatDelivery(card.delivery)}</span>}
     <p className="kanban-summary">{card.summary || 'Sem resumo'}</p>
     {!card.mine && <small className="kanban-note">Tarefa principal · atribuída a outra pessoa</small>}
     {card.priority && depth === 0 && card.mine && <small className="kanban-note">Prioridade {card.priority}</small>}
@@ -43,6 +45,10 @@ export function Home({ c }: { c: AppController }) {
   const [sprint, setSprint] = useState<string | null>(chosenSprint);
   const [menu, setMenu] = useState<{ x: number; y: number; key: string; depth: number } | null>(null);
   const [progressTick, setProgressTick] = useState(0);
+  const [flagging, setFlagging] = useState<{ key: string } | null>(null);
+  const [flagClass, setFlagClass] = useState<string>(IMPEDIMENT_CLASSES[0].id);
+  const [flagComment, setFlagComment] = useState('');
+  const flagDialog = useRef<HTMLDialogElement>(null);
   const [flag, setFlag] = useState<{ key: string; flagged?: boolean; error?: string } | null>(null);
   const [copied, setCopied] = useState('');
   // Mudar o status no Jira: pelo menu do botão direito ("Mover para") ou arrastando o cartão para outra coluna (com confirmação).
@@ -82,9 +88,10 @@ export function Home({ c }: { c: AppController }) {
   const flash = (message: string) => { setCopied(message); setTimeout(() => setCopied(current => current === message ? '' : current), 3500); };
   const perform = async (key: string, move: JiraMove, to: string) => {
     setMoving(true); setMoveError('');
-    try { await moveIssue(key, move.id); flash(`${key} movida para ${to}`); await load(); }
+    try { await moveIssue(key, move.id); flash(`${key} movida para ${to}`); }
     catch (cause) { setMoveError(`Não foi possível mover ${key} para “${to}”: ${(cause as Error).message}`); }
     finally { setMoving(false); }
+    await load();
   };
   const dropOn = async (column: HomeColumn) => {
     const key = dragging; setDragging(null); setOver('');
@@ -114,7 +121,18 @@ export function Home({ c }: { c: AppController }) {
     try { await setFlagged(key, flagged); flash(flagged ? `Red flag colocado em ${key}` : `Red flag removido de ${key}`); }
     catch (cause) { setMoveError(`Não foi possível ${flagged ? 'colocar' : 'remover'} o red flag de ${key}: ${(cause as Error).message}`); }
     finally { setMoving(false); }
+    await load();
   };
+  const confirmFlag = async () => {
+    const current = flagging; if (!current) return;
+    const classification = IMPEDIMENT_CLASSES.find(item => item.id === flagClass);
+    setFlagging(null); setMoving(true); setMoveError('');
+    try { await setFlagged(current.key, true, { classification: classification ? { id: classification.id, value: classification.value } : undefined, comment: flagComment }); flash(`Red flag colocado em ${current.key}`); }
+    catch (cause) { setMoveError(`Não foi possível colocar o red flag de ${current.key}: ${(cause as Error).message}`); }
+    finally { setMoving(false); }
+    await load();
+  };
+  useEffect(() => { if (flagging) flagDialog.current?.showModal(); else if (flagDialog.current?.open) flagDialog.current.close(); }, [flagging]);
   const copyKey = (key: string) => {
     setMenu(null);
     void window.gitManager.copyText(key).then(() => flash(`${key} copiado`)).catch(() => {});
@@ -166,14 +184,14 @@ export function Home({ c }: { c: AppController }) {
         {noSprintField && <span className="kanban-warning" title="O Jira desta conta não informou um campo Sprint (nem pelo nome, nem pelo formato dos valores). Se as tarefas têm sprint no Jira, use ↻ Atualizar ou avise quem mantém o app.">⚠ Campo Sprint não encontrado</span>}
         {copied && <span className="kanban-copied" role="status">✓ {copied}</span>}
         {columns && (options.length > 0 || withoutSprint) && <label className="kanban-filter"><span>Sprint</span><select aria-label="Filtrar por sprint" value={effective} onChange={e => choose(e.target.value)}><option value="">Todas as sprints</option>{options.map(option => <option key={option.name} value={option.name}>{option.name}</option>)}{withoutSprint && <option value={NO_SPRINT}>Sem sprint</option>}</select></label>}
-        <button className="quiet" disabled={loading} onClick={() => { setProgressTick(tick => tick + 1); void load(); }}>{loading ? 'Atualizando…' : '↻ Atualizar tarefas'}</button>
+        <button className="quiet" disabled={loading} onClick={() => { setProgressTick(tick => tick + 1); void load(); }}>{loading ? 'Atualizando…' : '↻ Atualizar tudo'}</button>
       </div>
     </div>
     {progressSprint && progress?.sprint === progressSprint && <section className="sprint-progress" aria-label="Progresso da sprint">
       {progress.data ? <>
-        <h2>Essa sprint já está com <strong>{progress.data.percent}%</strong> concluída</h2>
+        <div className="sprint-head"><h2>Essa sprint já está com <strong>{progress.data.percent}%</strong> concluída</h2><button className="quiet" disabled={loading} title="Recarrega tarefas, red flags e o progresso da sprint" onClick={() => { setProgressTick(tick => tick + 1); void load(); }}>↻ Carregar infos</button></div>
         <div className="sprint-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.data.percent}><span style={{ width: `${progress.data.percent}%` }}/></div>
-        <p className="sprint-note">{progress.data.counts.find(item => item.id === 'finalizado')?.count ?? 0} de {progress.data.total} tarefas principais finalizadas · sprint inteira, todas as pessoas</p>
+        <p className="sprint-note">{progress.data.counts.find(item => item.id === 'finalizado')?.count ?? 0} de {progress.data.total} tarefas principais finalizadas · sprint inteira, todas as pessoas, sem cards de Gestão</p>
         <ul className="sprint-counts">{progress.data.counts.map(item => <li key={item.id}><strong>{item.count}</strong><span>{item.label}</span></li>)}{progress.data.others.map(item => <li key={`outro:${item.status}`} title="Status que não é uma das colunas do quadro"><strong>{item.count}</strong><span>{item.status}</span></li>)}</ul>
       </> : progress.error ? <p className="sprint-note">Não foi possível calcular o progresso da sprint: {progress.error}</p> : <p className="sprint-note">Calculando o progresso da sprint…</p>}
     </section>}
@@ -197,7 +215,7 @@ export function Home({ c }: { c: AppController }) {
       <button role="menuitem" onClick={() => copyText(`${JIRA_BASE}/browse/${encodeURIComponent(menu.key)}`, `Link de ${menu.key} copiado`)}>Copiar link da issue</button>
       {menu.depth === 0 && <button role="menuitem" onClick={() => void copyXml(menu.key)}>Copiar XML da issue</button>}
       <button role="menuitem" onClick={() => { setMenu(null); openIssue(menu.key); }}>Abrir no Jira</button>
-      {flag?.key === menu.key && flag.flagged !== undefined ? <button role="menuitem" disabled={moving} onClick={() => void toggleFlag(menu.key, !flag.flagged)}>{flag.flagged ? '⚑ Retirar red flag' : '⚑ Colocar red flag'}</button> : <span className="menu-note">{flag?.key === menu.key && flag.error ? `Red flag indisponível: ${flag.error}` : 'Carregando red flag…'}</span>}
+      {flag?.key === menu.key && flag.flagged !== undefined ? <button role="menuitem" disabled={moving} onClick={() => { if (flag.flagged) void toggleFlag(menu.key, false); else { const key = menu.key; setMenu(null); setFlagClass(IMPEDIMENT_CLASSES[0].id); setFlagComment(''); setFlagging({ key }); } }}>{flag.flagged ? '⚑ Retirar red flag' : '⚑ Colocar red flag'}</button> : <span className="menu-note">{flag?.key === menu.key && flag.error ? `Red flag indisponível: ${flag.error}` : 'Carregando red flag…'}</span>}
       <hr/>
       <span className="menu-label">Mover para</span>
       {(() => {
@@ -209,6 +227,13 @@ export function Home({ c }: { c: AppController }) {
         return items.map(move => <button key={move.id} role="menuitem" aria-label={`Mover para ${moveTarget(move)}`} disabled={moving} onClick={() => { setMenu(null); void perform(menu.key, move, moveTarget(move)); }}>{moveTarget(move)}{move.to && move.name !== move.to.name && <small> · {move.name}</small>}</button>);
       })()}
     </div>}
+    <dialog ref={flagDialog} className="issue-dialog flag-dialog" aria-labelledby="flag-title" onCancel={event => { event.preventDefault(); setFlagging(null); }}>
+      <h2 id="flag-title">Classificar Impedimento</h2>
+      <p>Adicionar Flag para <strong>{flagging?.key}</strong></p>
+      <label className="flag-field"><span>Classificação:</span><select value={flagClass} onChange={event => setFlagClass(event.target.value)}>{IMPEDIMENT_CLASSES.map(item => <option key={item.id} value={item.id}>{item.value}</option>)}</select></label>
+      <label className="flag-field"><span>Comentário:</span><textarea rows={4} placeholder="Digite seu comentário" value={flagComment} onChange={event => setFlagComment(event.target.value)}/></label>
+      <div className="card-actions"><button onClick={() => setFlagging(null)}>Cancelar</button><button className="primary" disabled={moving} onClick={() => void confirmFlag()}>Adicionar</button></div>
+    </dialog>
     <dialog ref={confirmation} className="issue-dialog" aria-labelledby="move-title" onCancel={event => { event.preventDefault(); setPending(null); }}>
       <h2 id="move-title">Mover {pending?.key}?</h2>
       <p>O status vai mudar de <strong>{pending?.from}</strong> para <strong>{pending?.to}</strong> no Jira.</p>

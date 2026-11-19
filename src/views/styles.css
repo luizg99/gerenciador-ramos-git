@@ -927,15 +927,15 @@ dialog{border:0}
 .sidebar-label{margin-top:0}
 nav button[aria-label="Início"]{margin-bottom:12px}
 .page:has(.kanban-board){max-width:none}
-.kanban-board{display:grid;gap:18px}
-.sprint-progress{background:var(--panel);border-radius:14px;padding:16px 20px;display:grid;gap:10px}
-.sprint-progress h2{margin:0;font-size:17px;font-weight:500}
-.sprint-meter{height:10px;border-radius:980px;background:var(--border,rgba(128,128,128,.25));overflow:hidden}
+.kanban-board{display:grid;gap:10px}
+.sprint-progress{background:var(--panel);border-radius:12px;padding:10px 16px;display:grid;gap:6px}
+.sprint-progress h2{margin:0;font-size:15px;font-weight:500}
+.sprint-meter{height:6px;border-radius:980px;background:var(--border,rgba(128,128,128,.25));overflow:hidden}
 .sprint-meter span{display:block;height:100%;border-radius:980px;background:var(--accent,#0a84ff)}
-.sprint-note{margin:0;color:var(--muted);font-size:13px}
-.sprint-counts{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
-.sprint-counts li{display:grid;gap:2px}
-.sprint-counts strong{font-size:20px;font-weight:600}
+.sprint-note{margin:0;color:var(--muted);font-size:12px}
+.sprint-counts{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 18px}
+.sprint-counts li{display:flex;align-items:baseline;gap:6px}
+.sprint-counts strong{font-size:14px;font-weight:600}
 .sprint-counts span{font-size:12px;color:var(--muted)}
 .kanban-bar{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .kanban-bar p{margin:0;color:var(--muted);font-size:14px}
@@ -949,8 +949,8 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .cat-new{background:var(--subtle)}
 .cat-indeterminate{background:var(--primary)}
 .cat-done{background:var(--green)}
-.kanban-cards{display:grid;gap:10px}
-.kanban-card{background:var(--bg);border-radius:14px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.kanban-cards{display:flex;flex-direction:column;gap:8px}
+.kanban-card{background:var(--bg);border-radius:8px;padding:12px 12px;flex:none;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .kanban-card.context{background:transparent;box-shadow:inset 0 0 0 1.5px var(--line-strong);border-style:dashed}
 .kanban-card-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .kanban-key{padding:0;background:none;color:var(--accent);font-size:12px;font-weight:600;border-radius:4px}
@@ -961,10 +961,10 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .kanban-status.cat-indeterminate::before{background:var(--primary)}
 .kanban-status.cat-done::before{background:var(--green)}
 .kanban-status.cat-new::before{background:var(--subtle)}
-.kanban-summary{margin:6px 0 0;font-size:13px;line-height:1.45;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.kanban-summary{margin:6px 0 0;font-size:14px;line-height:1.4;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .kanban-note{display:block;margin-top:6px;font-size:11px;color:var(--subtle)}
 .kanban-children{display:grid;gap:8px;margin:12px 0 0 8px;padding-left:12px;border-left:2px solid var(--line-strong)}
-.kanban-card.child{background:var(--panel);box-shadow:none;padding:10px 12px}
+.kanban-card.child{background:var(--panel);box-shadow:none;padding:10px 12px;flex:none}
 :root[data-theme="light"] .kanban-card.child{background:var(--panel)}
 .kanban-card.context{border:0;box-shadow:inset 0 0 0 1.5px var(--line-strong)}
 .kanban-status{white-space:nowrap}
@@ -1065,3 +1065,38 @@ nav button[aria-label="Início"]{margin-bottom:12px}
 .pr-conflict.conflicts .pr-conflict-badge{color:#d70015}
 .pr-conflict.ok .pr-conflict-badge{color:#248a3d}
 .pr-conflict.checking .pr-conflict-badge,.pr-conflict.unknown .pr-conflict-badge{color:var(--muted)}
+
+/* Texto sempre dentro do cartão: sem corte, quebrando linha e mostrando o resumo inteiro */
+.kanban-card{box-sizing:border-box;width:100%;overflow:visible}
+.kanban-card-top{row-gap:8px}
+.kanban-summary{display:block;-webkit-line-clamp:unset;overflow:visible;word-break:break-word;hyphens:auto}
+.kanban-note,.kanban-sprint{line-height:1.4}
+.kanban-sprint{white-space:normal;max-width:100%}
+
+/* Quadro mais "grosso": colunas mais largas e com mais respiro (os cartões continuam no tamanho do Jira) */
+.kanban-columns{grid-auto-columns:minmax(300px,1fr);gap:18px}
+.kanban-column{padding:18px 16px;border-radius:22px}
+.kanban-column>header{padding:6px 8px 18px;gap:10px}
+.kanban-column h2{font-size:16px}
+.kanban-dot{width:11px;height:11px}
+.kanban-column .count{font-size:12px;padding:2px 9px}
+.kanban-cards{gap:12px;padding-right:4px}
+.kanban-card{padding:14px 14px}
+
+/* Red flag: cartão vermelho com bandeirinha (a descrição do impedimento aparece ao passar o mouse nela) */
+.kanban-card.flagged{background:color-mix(in srgb,#d70015 20%,var(--bg));box-shadow:inset 0 0 0 1.5px #d70015}
+.kanban-card.child.flagged{background:color-mix(in srgb,#d70015 18%,var(--panel))}
+.kanban-flag{margin-left:auto;color:#ff453a;font-size:16px;line-height:1;cursor:help}
+.flag-dialog{min-width:420px}
+.flag-field{display:grid;gap:6px;margin:12px 0;font-size:13px;color:var(--muted)}
+.flag-field select,.flag-field textarea{width:100%;font:inherit;color:var(--text)}
+.flag-field textarea{resize:vertical;min-height:90px}
+
+.sprint-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+
+.kanban-delivery{display:inline-block;margin:6px 0 0 0;font-size:11px;font-weight:500;padding:2px 9px;border-radius:980px;background:var(--panel-2);color:var(--muted);vertical-align:top}
+.kanban-delivery.late{background:color-mix(in srgb,#d70015 18%,transparent);color:#ff453a}
+
+.jira-token-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.jira-token-form input{flex:1;min-width:260px}
+.jira-token small{font-weight:400;color:var(--muted)}

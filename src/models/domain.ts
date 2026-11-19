@@ -31,6 +31,9 @@ export interface Api {
   jiraView(bounds: JiraBounds | null): Promise<void>;
   jiraState(): Promise<JiraBrowserState>;
   jiraOpen(): Promise<void>;
+  jiraTokenStatus(): Promise<'none' | 'ok' | 'refused'>;
+  setJiraToken(token: string): Promise<string>;
+  clearJiraToken(): Promise<void>;
   jiraRequestText(path: string): Promise<string>;
   jiraRequest(path: string, method?: JiraMethod, body?: unknown): Promise<unknown>;
   onJiraState(callback: (state: JiraBrowserState) => void): () => void;

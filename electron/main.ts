@@ -15,6 +15,7 @@ import { GeminiBrowser } from './services/geminiBrowser';
 import { GEM_URL } from '../src/models/gemini';
 import { isAllowedJiraPath, isAllowedJiraXmlPath } from '../src/models/jira';
 import { JiraBrowser } from './services/jiraBrowser';
+import { clearJiraToken, getJiraToken, isJiraTokenRefused, jiraTokenRequest, saveJiraToken } from './services/jiraToken';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 import { openTortoise } from './services/tortoiseGit';
 import { watchForUpdates } from './services/autoUpdate';
@@ -58,6 +59,14 @@ function registerIpc() {
   handle('jira:view', z.tuple([z.object({ x: jiraBound, y: jiraBound, width: jiraBound.nonnegative(), height: jiraBound.nonnegative() }).nullable()]), bounds => jira.setBounds(bounds));
   handle('jira:state', z.tuple([]), () => jira.getState());
   handle('jira:open', z.tuple([]), () => jira.open());
+  handle('jira:tokenStatus', z.tuple([]), async () => (await getJiraToken()) ? (isJiraTokenRefused() ? 'refused' : 'ok') : 'none');
+  // Só guarda o token depois de provar que o Jira o aceita; devolve o nome do usuário dono do token.
+  handle('jira:setToken', z.tuple([z.string().min(8).max(4096).regex(/^[\x21-\x7e]+$/, 'O token não pode ter espaços ou caracteres especiais.')]), async token => {
+    const me = await jiraTokenRequest(token, '/rest/api/2/myself') as { displayName?: string; name?: string } | null;
+    await saveJiraToken(token);
+    return me?.displayName ?? me?.name ?? '';
+  });
+  handle('jira:clearToken', z.tuple([]), () => clearJiraToken());
   handle('jira:requestText', z.tuple([z.string().min(1).max(512).refine(isAllowedJiraXmlPath)]), path => jira.requestText(path));
   handle('jira:request', z.tuple([
     z.string().min(1).max(4096).refine(isAllowedJiraPath),
