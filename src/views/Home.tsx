@@ -36,6 +36,7 @@ export function Home({ c }: { c: AppController }) {
   const enabled = c.useJira;
   const [columns, setColumns] = useState<HomeColumn[] | null>(cachedBoard()?.columns ?? null);
   const [user, setUser] = useState(cachedBoard()?.user ?? '');
+  const [teamSprints, setTeamSprints] = useState(cachedBoard()?.teamSprints ?? []);
   const [noSprintField, setNoSprintField] = useState(cachedBoard() ? cachedBoard()!.sprintFields.length === 0 : false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -131,7 +132,7 @@ export function Home({ c }: { c: AppController }) {
     try {
       const board = await fetchMyBoard();
       if (token !== run.current) return;
-      setColumns(board.columns); setUser(board.user); setNoSprintField(board.sprintFields.length === 0);
+      setColumns(board.columns); setUser(board.user); setTeamSprints(board.teamSprints); setNoSprintField(board.sprintFields.length === 0);
     } catch (cause) { if (token === run.current) { failed.current = true; setError((cause as Error).message); } }
     finally { if (token === run.current) setLoading(false); }
   };
@@ -140,7 +141,8 @@ export function Home({ c }: { c: AppController }) {
   useEffect(() => window.gitManager.onJiraState(state => { if (state.phase === 'ready' && failed.current) void load(); }), []);
 
   if (!enabled) return <section className="card"><div className="empty"><span className="empty-symbol">▤</span><h3>Suas tarefas do Jira ficam aqui</h3><p>Ative “Usa Jira” nas configurações para ver as tarefas atribuídas a você em formato de quadro.</p><button className="primary" onClick={() => c.selectTab('settings')}>Abrir configurações</button></div></section>;
-  const options = columns ? sprintOptions(columns) : [];
+  // As sprints do time entram na lista mesmo sem tarefa sua: dá para ver o progresso da sprint atual com o quadro vazio.
+  const options = columns ? [...new Map([...sprintOptions(columns), ...teamSprints].map(item => [item.name, item])).values()].sort((a, b) => b.start - a.start || a.name.localeCompare(b.name, 'pt-BR')) : [];
   const withoutSprint = columns ? hasWithoutSprint(columns) : false;
   // Sem escolha: a sprint mais recente. Se a sprint escolhida deixou de existir depois de atualizar, volta para "todas".
   const effective = sprint === null ? options[0]?.name ?? '' : sprint && sprint !== NO_SPRINT && !options.some(option => option.name === sprint) ? '' : sprint;
@@ -172,7 +174,7 @@ export function Home({ c }: { c: AppController }) {
         <h2>Essa sprint já está com <strong>{progress.data.percent}%</strong> concluída</h2>
         <div className="sprint-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.data.percent}><span style={{ width: `${progress.data.percent}%` }}/></div>
         <p className="sprint-note">{progress.data.counts.find(item => item.id === 'finalizado')?.count ?? 0} de {progress.data.total} tarefas principais finalizadas · sprint inteira, todas as pessoas</p>
-        <ul className="sprint-counts">{progress.data.counts.map(item => <li key={item.id}><strong>{item.count}</strong><span>{item.label}</span></li>)}</ul>
+        <ul className="sprint-counts">{progress.data.counts.map(item => <li key={item.id}><strong>{item.count}</strong><span>{item.label}</span></li>)}{progress.data.others.map(item => <li key={`outro:${item.status}`} title="Status que não é uma das colunas do quadro"><strong>{item.count}</strong><span>{item.status}</span></li>)}</ul>
       </> : progress.error ? <p className="sprint-note">Não foi possível calcular o progresso da sprint: {progress.error}</p> : <p className="sprint-note">Calculando o progresso da sprint…</p>}
     </section>}
     {moveError && <div className="alert error" role="alert"><strong>Status não alterado</strong><p>{moveError}</p><button onClick={() => setMoveError('')}>Fechar</button></div>}

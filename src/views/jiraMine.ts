@@ -8,7 +8,7 @@ import { detectSprintFieldIds, isSprintField, issueSprints } from '../models/jir
 // tarefa vier com sprint, o campo é deduzido pelo formato dos valores. Só é guardado depois de achado de verdade (senão tenta de novo).
 let sprintFields: string[] | null = null;
 let shapeTried = false;
-export interface MyBoard { columns: HomeColumn[]; user: string; at: number; sprintFields: string[] }
+export interface MyBoard { columns: HomeColumn[]; user: string; at: number; sprintFields: string[]; teamSprints: { name: string; start: number }[] }
 let cache: MyBoard | null = null;
 export const cachedBoard = () => cache;
 
@@ -23,6 +23,21 @@ async function searchMine(request: Request, fields: string[]): Promise<HomeIssue
   return issues;
 }
 const hasSprint = (issues: HomeIssue[], ids: string[]) => issues.some(issue => issueSprints(issue.fields as Parameters<typeof issueSprints>[0], ids).length > 0);
+
+// Sprints do time, mesmo sem tarefa sua nelas: acha os projetos onde você já teve tarefa em sprint e lista as sprints abertas deles
+//, para dar para ver o progresso da sprint atual sem ter nada atribuído.
+async function fetchTeamSprints(request: Request, ids: string[]): Promise<{ name: string; start: number }[]> {
+  if (!ids.length) return [];
+  const found = new Map<string, number>();
+  const collect = (issues: HomeIssue[]) => issues.forEach(issue => issueSprints(issue.fields as Parameters<typeof issueSprints>[0], ids).forEach(ref => found.set(ref.name, Math.max(found.get(ref.name) ?? 0, ref.start))));
+  const search = async (jql: string, max: number) => ((await request('/rest/api/2/search', 'POST', { jql, startAt: 0, maxResults: max, fields: ['project', ...ids] })) as { issues?: (HomeIssue & { fields: { project?: { key?: string } } })[] }).issues ?? [];
+  try {
+    const history = await search('assignee was currentUser() AND sprint is not EMPTY ORDER BY updated DESC', 50);
+    const projects = [...new Set(history.map(issue => (issue.fields as { project?: { key?: string } }).project?.key).filter((key): key is string => !!key && /^[A-Za-z][A-Za-z0-9_]*$/.test(key)))].slice(0, 10);
+    if (projects.length) collect(await search(`project in (${projects.join(',')}) AND sprint in openSprints() ORDER BY updated DESC`, 100));
+  } catch { /* sem isso, a lista de sprints fica só com as das suas tarefas */ }
+  return [...found].map(([name, start]) => ({ name, start }));
+}
 
 export async function fetchMyBoard(): Promise<MyBoard> {
   const request: Request = (path, method, body) => window.gitManager.jiraRequest(path, method, body);
@@ -45,7 +60,7 @@ export async function fetchMyBoard(): Promise<MyBoard> {
       if (detected.length) { ids = sprintFields = [...new Set([...ids, ...detected])]; issues = await searchMine(request, [...HOME_FIELDS, ...ids]); }
     } catch { /* sem o plano B, as tarefas ficam sem sprint */ }
   }
-  cache = { columns: buildHomeBoard(issues, issue => issueSprints(issue.fields as Parameters<typeof issueSprints>[0], ids)), user: await me, at: Date.now(), sprintFields: ids };
+  cache = { columns: buildHomeBoard(issues, issue => issueSprints(issue.fields as Parameters<typeof issueSprints>[0], ids)), user: await me, at: Date.now(), sprintFields: ids, teamSprints: await fetchTeamSprints(request, ids) };
   return cache;
 }
 

@@ -40,7 +40,7 @@ const boardMatchers: [string, RegExp][] = [
   ['em-revisao', /revis|review|aprova/i],
   ['em-teste', /test|aceita|(^|\s)qa(\s|$)|valida|homolog|verifica/i],
   ['em-desenvolvimento', /desenvolv|in progress|progress|andamento|doing|codifica|implement/i],
-  ['a-fazer', /^(open|opened|aberto|aberta|backlog|to ?do|a fazer|novo|nova|new|pendente|selected for development)(\s|$)/i],
+  ['a-fazer', /^(open|opened|aberto|aberta|backlog|to ?do|a fazer|comprometid[oa]|novo|nova|new|pendente|selected for development)(\s|$)/i],
   ['finalizado', /finaliz|conclu|done|pronto|resolvid|resolved|closed|fechad/i]
 ];
 export const columnIdFor = (status: string): string | null => boardMatchers.find(([, pattern]) => pattern.test(status.trim()))?.[0] ?? null;
@@ -128,11 +128,14 @@ export function findCard(columns: HomeColumn[], key: string): HomeCard | undefin
 }
 
 // Progresso da sprint inteira (todas as pessoas, só tarefas principais): quantas estão em cada coluna do quadro e o % finalizado.
-export interface SprintProgress { total: number; percent: number; counts: { id: string; label: string; count: number }[] }
+export interface SprintProgress { total: number; percent: number; counts: { id: string; label: string; count: number }[]; others: { status: string; count: number }[] }
 export const sprintJql = (sprint: string) => `sprint = "${sprint.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" AND issuetype in standardIssueTypes()`;
 export function summarizeSprint(issues: { fields: { status?: { name?: string }; issuetype?: { name?: string; subtask?: boolean } } }[]): SprintProgress {
   const parents = issues.filter(issue => !issue.fields.issuetype?.subtask);
   const counts = BOARD_COLUMNS.map(item => ({ id: item.id as string, label: item.label as string, count: parents.filter(issue => columnIdFor(issue.fields.status?.name ?? '') === item.id).length }));
   const done = counts.find(item => item.id === 'finalizado')?.count ?? 0;
-  return { total: parents.length, percent: parents.length ? Math.round(done / parents.length * 100) : 0, counts };
+  // Status que não casam com nenhuma coluna do quadro (ex.: Cancelado, Impedido) ficam à parte, para a soma bater com o total.
+  const others = new Map<string, number>();
+  for (const issue of parents) { const name = issue.fields.status?.name?.trim() || 'Sem status'; if (!columnIdFor(name)) others.set(name, (others.get(name) ?? 0) + 1); }
+  return { total: parents.length, percent: parents.length ? Math.round(done / parents.length * 100) : 0, counts, others: [...others].map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count) };
 }

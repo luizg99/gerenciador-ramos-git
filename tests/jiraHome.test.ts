@@ -118,6 +118,15 @@ describe('progresso da sprint', () => {
     expect(result.percent).toBe(50);
     expect(result.counts.map(item => item.count)).toEqual([1, 0, 0, 0, 0, 1, 0, 2]);
   });
+  it('status fora das colunas aparecem à parte e a soma fecha com o total', () => {
+    const result = summarizeSprint([it2('Finalizado'), it2('Cancelado'), it2('Cancelado'), it2('Impedido')]);
+    expect(result.others).toEqual([{ status: 'Cancelado', count: 2 }, { status: 'Impedido', count: 1 }]);
+    expect(result.counts.reduce((sum, item) => sum + item.count, 0) + result.others.reduce((sum, item) => sum + item.count, 0)).toBe(result.total);
+  });
+  it('"Comprometido" conta como A fazer', () => {
+    expect(columnIdFor('Comprometido')).toBe('a-fazer');
+    expect(summarizeSprint([it2('Comprometido'), it2('A fazer')]).counts[0].count).toBe(2);
+  });
   it('sprint vazia dá 0% e o nome da sprint é escapado no JQL', () => {
     expect(summarizeSprint([]).percent).toBe(0);
     expect(sprintJql('Sprint "A"')).toContain('sprint = "Sprint \\"A\\""');
