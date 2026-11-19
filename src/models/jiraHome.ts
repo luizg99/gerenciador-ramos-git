@@ -126,3 +126,13 @@ export function findCard(columns: HomeColumn[], key: string): HomeCard | undefin
   for (const column of columns) for (const card of column.cards) { const found = search(card); if (found) return found; }
   return undefined;
 }
+
+// Progresso da sprint inteira (todas as pessoas, só tarefas principais): quantas estão em cada coluna do quadro e o % finalizado.
+export interface SprintProgress { total: number; percent: number; counts: { id: string; label: string; count: number }[] }
+export const sprintJql = (sprint: string) => `sprint = "${sprint.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" AND issuetype in standardIssueTypes()`;
+export function summarizeSprint(issues: { fields: { status?: { name?: string }; issuetype?: { name?: string; subtask?: boolean } } }[]): SprintProgress {
+  const parents = issues.filter(issue => !issue.fields.issuetype?.subtask);
+  const counts = BOARD_COLUMNS.map(item => ({ id: item.id as string, label: item.label as string, count: parents.filter(issue => columnIdFor(issue.fields.status?.name ?? '') === item.id).length }));
+  const done = counts.find(item => item.id === 'finalizado')?.count ?? 0;
+  return { total: parents.length, percent: parents.length ? Math.round(done / parents.length * 100) : 0, counts };
+}

@@ -13,7 +13,7 @@ import type { Snapshot } from '../src/models/domain';
 import { installTextContextMenu } from './textContextMenu';
 import { GeminiBrowser } from './services/geminiBrowser';
 import { GEM_URL } from '../src/models/gemini';
-import { isAllowedJiraPath } from '../src/models/jira';
+import { isAllowedJiraPath, isAllowedJiraXmlPath } from '../src/models/jira';
 import { JiraBrowser } from './services/jiraBrowser';
 import { cloneRepository, listAzureRepositories, listGitHubRepositories } from './services/cloneRepository';
 import { openTortoise } from './services/tortoiseGit';
@@ -58,6 +58,7 @@ function registerIpc() {
   handle('jira:view', z.tuple([z.object({ x: jiraBound, y: jiraBound, width: jiraBound.nonnegative(), height: jiraBound.nonnegative() }).nullable()]), bounds => jira.setBounds(bounds));
   handle('jira:state', z.tuple([]), () => jira.getState());
   handle('jira:open', z.tuple([]), () => jira.open());
+  handle('jira:requestText', z.tuple([z.string().min(1).max(512).refine(isAllowedJiraXmlPath)]), path => jira.requestText(path));
   handle('jira:request', z.tuple([
     z.string().min(1).max(4096).refine(isAllowedJiraPath),
     z.enum(['GET', 'POST', 'PUT', 'DELETE']), z.unknown().optional()
@@ -123,6 +124,10 @@ function registerIpc() {
   handle('git:findPullRequests', z.tuple([id, prPairsSchema]), (id, pairs) => controller.exclusive(async () => {
     const repo = controller.repository(id);
     return new AzurePullRequests().find(repo, await controller.git.pullRequestInfo(repo), pairs);
+  }));
+  handle('git:pullRequestConflicts', z.tuple([id, prPairsSchema]), (id, pairs) => controller.exclusive(async () => {
+    const repo = controller.repository(id);
+    return new AzurePullRequests().conflicts(repo, await controller.git.pullRequestInfo(repo), pairs);
   }));
   handle('reviews:save', z.tuple([id, reviewInputSchema]), (id, input) => controller.exclusive(() => controller.reviews.save(controller.repository(id), input)));
   handle('reviews:copy', z.tuple([z.string().uuid()]), async messageId => { clipboard.write(await controller.reviews.copy(messageId)); });

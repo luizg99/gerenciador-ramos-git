@@ -10,6 +10,7 @@ const api: Api = {
   jiraView: bounds => call('jira:view', bounds) as Promise<void>,
   jiraState: () => call('jira:state') as Promise<JiraBrowserState>,
   jiraOpen: () => call('jira:open') as Promise<void>,
+  jiraRequestText: path => call('jira:requestText', path) as Promise<string>,
   jiraRequest: (path, method, body) => call('jira:request', path, method ?? 'GET', body) as Promise<unknown>,
   onJiraState: callback => {
     const listener = (_event: Electron.IpcRendererEvent, state: JiraBrowserState) => callback(state);
@@ -59,6 +60,7 @@ const api: Api = {
   updateReviewIssue: (messageId, issue) => call('reviews:updateIssue', messageId, issue) as ReturnType<Api['updateReviewIssue']>,
   openReviewLink: url => call('reviews:openLink', url) as Promise<void>,
   createPullRequests: (id, pairs, issue) => call('git:createPullRequests', id, pairs, issue) as ReturnType<Api['createPullRequests']>,
+  pullRequestConflicts: (id, pairs) => call('git:pullRequestConflicts', id, pairs) as ReturnType<Api['pullRequestConflicts']>,
   findPullRequests: (id, pairs) => call('git:findPullRequests', id, pairs) as ReturnType<Api['findPullRequests']>,
   saveReviewMessage: (id, input) => call('reviews:save', id, input) as ReturnType<Api['saveReviewMessage']>,
   copyReviewMessage: messageId => call('reviews:copy', messageId) as Promise<void>,

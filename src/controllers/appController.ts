@@ -10,11 +10,13 @@ export interface ViewModel {
   progress: Progress[];
   manualConfirmed: boolean; loadingRepository: boolean; loadingHistory: boolean;
   createBase: string; publishNew: boolean; installOnSwitch: boolean; prInfo?: PullRequestInfo; prSource: string; prTarget: string;
-  dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; rememberPrDestinations: boolean; rememberBranchBases: boolean;
+  dynamicBranches: boolean; branchRows: BranchRow[]; switchRow: number | null; dynamicPr: boolean; prRows: PrRow[]; prConflicts: PrConflict[]; rememberPrDestinations: boolean; rememberBranchBases: boolean;
   jiraIssue: string; prUrl: string; reviewMessages: ReviewMessage[]; reviewSearch: string; generatedReview?: ReviewMessage;
 }
 export interface BranchRow { name: string; base: string }
+export type PrMerge = 'conflicts' | 'ok' | 'checking' | 'unknown' | 'none';
 export interface PrRow { source: string; target: string; url?: string }
+export interface PrConflict { source: string; target: string; url: string; state: PrMerge }
 // Checks lembrados entre aberturas: ficam no settings.json (não dependem do armazenamento do navegador).
 const preferenceKeys = ['dynamicBranches', 'installOnSwitch', 'rememberPrDestinations', 'rememberBranchBases'] as const;
 const emptyPrRows = (targets: string[] = []): PrRow[] => Array.from({ length: 4 }, (_, index) => ({ source: '', target: targets[index] ?? '' }));
@@ -30,7 +32,7 @@ export class AppController {
     switchTarget: '', switchMode: 'block', historyRef: 'HEAD', history: [], tortoiseLocked: false, tortoiseOpened: false, source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false,
     progress: [], manualConfirmed: false, loadingRepository: false, loadingHistory: false,
     createBase: '', publishNew: true, installOnSwitch: false, prSource: '', prTarget: '',
-    dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), rememberPrDestinations: false, rememberBranchBases: false,
+    dynamicBranches: false, branchRows: emptyBranchRows(), switchRow: null, dynamicPr: true, prRows: emptyPrRows(), prConflicts: [], rememberPrDestinations: false, rememberBranchBases: false,
     jiraIssue: '', prUrl: '', reviewMessages: [], reviewSearch: ''
   };
   constructor(private api: Api) {}
@@ -174,7 +176,7 @@ export class AppController {
     await this.api.selectRepository(id);
     this.prSourcesVersion++;
     this.set({ jiraIssue: '', prUrl: '', generatedReview: undefined });
-    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prSource: '', prTarget: '', branchRows: emptyBranchRows(this.savedBranchBases()), switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), progress: [], manualConfirmed: false, tab: 'switch' });
+    this.set({ status: undefined, branches: [], switchTarget: '', history: [], historyRef: 'HEAD', source: '', sourceCommits: [], selectedCommits: [], targets: ['', '', ''], review: false, createBase: '', prInfo: undefined, prConflicts: [], prSource: '', prTarget: '', branchRows: emptyBranchRows(this.savedBranchBases()), switchRow: this.state.dynamicBranches ? 0 : null, prRows: emptyPrRows(this.savedPrDestinations(id)), progress: [], manualConfirmed: false, tab: 'switch' });
     void this.loadInBackground();
   });
   selectTab = (tab: Tab) => { this.set({ tab }); if (tab === 'history' && this.repository) void this.loadHistory(this.state.historyRef); if (tab === 'pr') void this.loadPullRequest(); this.prefillSource(); };
@@ -222,7 +224,9 @@ export class AppController {
   private savedPrDestinations(id: string): string[] {
     if (!this.state.rememberPrDestinations) return [];
     const value: unknown = this.state.snapshot.settings.ui?.prDestinations;
-    const list = Array.isArray(value) ? value : value && typeof value === 'object' ? (value as Record<string, unknown>)[id] : [];
+    // Formato antigo (um objeto por projeto): usa o do projeto atual e, se não houver, o de qualquer outro — o destino vale para todas as pastas.
+    const legacy = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+    const list = Array.isArray(value) ? value : legacy ? legacy[id] ?? Object.values(legacy).find(item => Array.isArray(item) && item.length) : [];
     return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string').slice(0, 4) : [];
   }
   private storePrDestinations(destinations: string[]) {
@@ -247,7 +251,9 @@ export class AppController {
       if (this.repository?.id !== id) return;
       const current = this.state.status?.branch;
       const source = current && !current.startsWith('(') ? current : '';
-      const remembered = this.savedPrDestinations(id);
+      // Destino vindo de outro projeto (formato antigo) só vale se o ramo existir neste repositório.
+      const known = new Set(this.state.branches.flatMap(branch => [branch.name, branch.ref]));
+      const remembered = this.savedPrDestinations(id).map(name => known.size && !known.has(name) && !known.has(`${this.state.prInfo?.remote ?? ''}/${name}`) ? '' : name);
       const [first, ...rest] = this.state.prRows;
       const sourcesVersion = this.prSourcesVersion;
       const initialRows = [first, ...rest].map((row, index) => ({ ...row, source: row.source || (index === 0 ? source : ''), target: row.target || remembered[index] || '' }));
@@ -338,12 +344,33 @@ export class AppController {
   };
   addPrRow = () => { if (this.state.prRows.length < 4) { this.prSourcesVersion++; this.set({ prRows: [...this.state.prRows, { source: '', target: '' }] }); } };
   removePrRow = (index: number) => { this.prSourcesVersion++; const rows = this.state.prRows.filter((_, i) => i !== index); this.set({ prRows: rows.length ? rows : [{ source: '', target: '' }] }); };
+  // Consulta se os PRs têm conflito. O Azure calcula o merge em segundo plano, então repete algumas vezes enquanto estiver "verificando".
+  private conflictRun = 0;
+  checkConflicts = async (attempts = 1) => {
+    const run = ++this.conflictRun; const id = this.id;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (attempt) await new Promise(resolve => setTimeout(resolve, 4000));
+      if (run !== this.conflictRun || this.repository?.id !== id) return;
+      const current = this.state.prConflicts;
+      if (!current.length) return;
+      this.set({ prConflicts: current.map(item => ({ ...item, state: 'checking' as const })) });
+      try {
+        const found = await this.api.pullRequestConflicts(id, current.map(({ source, target }) => ({ source, target })));
+        if (run !== this.conflictRun) return;
+        this.set({ prConflicts: this.state.prConflicts.map(item => ({ ...item, state: found.find(pr => pr.source === item.source && pr.target === item.target)?.state ?? 'unknown' })) });
+        if (!this.state.prConflicts.some(item => item.state === 'checking')) return;
+        if (attempt === attempts - 1) this.set({ prConflicts: this.state.prConflicts.map(item => item.state === 'checking' ? { ...item, state: 'unknown' as const } : item) });
+      } catch { if (run === this.conflictRun) this.set({ prConflicts: this.state.prConflicts.map(item => ({ ...item, state: 'unknown' as const })) }); return; }
+    }
+  };
   createPullRequests = () => this.action(async () => {
     parseJiraIssue(this.state.jiraIssue);
     const pairs = (this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }]).filter(row => row.source.trim() && row.target.trim());
     if (!pairs.length) throw new Error('Preencha ao menos uma origem e um destino para criar PR.');
+    this.conflictRun++;
     const result = await this.api.createPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })), this.state.jiraIssue);
-    this.set({ generatedReview: result.message });
+    this.set({ generatedReview: result.message, prConflicts: result.prs.map(pr => ({ ...pr, state: 'checking' as const })) });
+    if (result.prs.length) void this.checkConflicts(8);
     const remote = this.state.prInfo?.remote;
     const short = (value: string) => remote && value.trim().startsWith(remote + '/') ? value.trim().slice(remote.length + 1) : value.trim();
     const urlFor = (row: PrRow) => result.prs.find(pr => pr.source === short(row.source) && pr.target === short(row.target))?.url;

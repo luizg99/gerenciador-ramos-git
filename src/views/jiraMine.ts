@@ -1,5 +1,6 @@
 import type { JiraMove } from '../models/jiraHome';
-import { HOME_FIELDS, HOME_JQL, HOME_MAX_ISSUES, HOME_PAGE_SIZE, buildHomeBoard, type HomeColumn, type HomeIssue } from '../models/jiraHome';
+import { HOME_FIELDS, HOME_JQL, HOME_MAX_ISSUES, HOME_PAGE_SIZE, buildHomeBoard, sprintJql, summarizeSprint, type HomeColumn, type HomeIssue, type SprintProgress } from '../models/jiraHome';
+import { JIRA_FLAG_PATH, isImpeded } from '../models/jira';
 import { detectSprintFieldIds, isSprintField, issueSprints } from '../models/jiraReport';
 
 // Tarefas atribuídas ao usuário logado no Jira (usado pelo Início e pelo filtro "Minhas tarefas" da aba Jira).
@@ -56,3 +57,54 @@ export async function fetchMoves(key: string): Promise<JiraMove[]> {
 export async function moveIssue(key: string, transitionId: string): Promise<void> {
   await window.gitManager.jiraRequest(`/rest/api/2/issue/${encodeURIComponent(key)}/transitions`, 'POST', { transition: { id: transitionId } });
 }
+
+// Progresso da sprint toda (qualquer responsável, só tarefas principais). Fica em cache por sprint; ↻ Atualizar refaz a consulta.
+const sprintCache = new Map<string, SprintProgress>();
+const SPRINT_MAX_ISSUES = 5000;
+export const cachedSprintProgress = (sprint: string) => sprintCache.get(sprint);
+export async function fetchSprintProgress(sprint: string): Promise<SprintProgress> {
+  const issues: Parameters<typeof summarizeSprint>[0] = [];
+  // Avança pelo que o Jira devolveu de fato (ele pode limitar a página abaixo do pedido) e não aceita resultado truncado.
+  for (;;) {
+    const page = await window.gitManager.jiraRequest('/rest/api/2/search', 'POST', { jql: sprintJql(sprint), startAt: issues.length, maxResults: HOME_PAGE_SIZE, fields: ['status', 'issuetype'] }) as { issues?: typeof issues; total?: number };
+    issues.push(...(page.issues ?? []));
+    if (!page.issues?.length || issues.length >= (page.total ?? 0)) break;
+    if (issues.length >= SPRINT_MAX_ISSUES) throw new Error(`A sprint tem mais de ${SPRINT_MAX_ISSUES} tarefas; o progresso não seria confiável.`);
+  }
+  const progress = summarizeSprint(issues);
+  sprintCache.set(sprint, progress);
+  return progress;
+}
+
+// Red flag (impedimento) e XML da issue, usados pelo menu do botão direito/esquerdo no Início.
+let flagField: string | null | undefined;
+const flaggedFieldId = async (): Promise<string | null> => {
+  if (flagField !== undefined) return flagField;
+  const fields = await window.gitManager.jiraRequest('/rest/api/2/field') as { id: string; name: string }[];
+  flagField = (Array.isArray(fields) ? fields : []).find(field => /^(flagged|sinalizad[oa])$/i.test(field.name.trim()))?.id ?? null;
+  return flagField;
+};
+const issuePath = (key: string) => `/rest/api/2/issue/${encodeURIComponent(key)}`;
+export async function fetchFlagged(key: string): Promise<boolean> {
+  const id = await flaggedFieldId();
+  if (!id) throw new Error('Campo Flagged não encontrado neste Jira.');
+  return isImpeded(await window.gitManager.jiraRequest(`${issuePath(key)}?fields=${id}`) as { fields: Record<string, unknown> }, id);
+}
+export async function setFlagged(key: string, flag: boolean): Promise<void> {
+  const id = await flaggedFieldId();
+  if (!id) throw new Error('Campo Flagged não encontrado neste Jira.');
+  try { await window.gitManager.jiraRequest(JIRA_FLAG_PATH, 'POST', { issueKeys: [key], flag }); }
+  catch (cause) {
+    // Só tenta o campo direto quando o endpoint do quadro não existe/aceita; erro de rede ou de sessão aparece como está.
+    if (!/HTTP (400|404|405)/.test((cause as Error).message)) throw cause;
+    const current = (await window.gitManager.jiraRequest(`${issuePath(key)}?fields=${id}`) as { fields: Record<string, unknown> }).fields[id];
+    const values = (Array.isArray(current) ? current : []) as { value?: string }[];
+    const kept = values.filter(item => !/imped/i.test(item?.value ?? ''));
+    await window.gitManager.jiraRequest(issuePath(key), 'PUT', { fields: { [id]: flag ? [...kept, { value: values.find(item => /imped/i.test(item?.value ?? ''))?.value ?? 'Impediment' }] : kept.map(item => ({ value: item.value })) } });
+  }
+  // O Jira pode demorar um instante para refletir a mudança: confere algumas vezes antes de acusar falha.
+  let now = await fetchFlagged(key);
+  for (let attempt = 0; attempt < 3 && now !== flag; attempt++) { await new Promise(resolve => setTimeout(resolve, 800)); now = await fetchFlagged(key); }
+  if (now !== flag) throw new Error(`O Jira não ${flag ? 'colocou' : 'removeu'} o red flag. Faça direto no Jira (menu da tarefa).`);
+}
+export const fetchIssueXml = (key: string): Promise<string> => window.gitManager.jiraRequestText(`/si/jira.issueviews:issue-xml/${key}/${key}.xml`);

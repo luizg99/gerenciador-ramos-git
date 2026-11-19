@@ -5,6 +5,8 @@ import { ref } from '../../src/models/validation';
 
 export const prPairsSchema = z.array(z.object({ source: ref, target: ref })).min(1).max(4);
 export interface LocatedPullRequest { source: string; target: string; url: string }
+export type MergeState = 'conflicts' | 'ok' | 'checking' | 'unknown' | 'none';
+export interface PullRequestConflict { source: string; target: string; state: MergeState; url?: string }
 export interface CreatedPullRequests { prs: (LocatedPullRequest & { created: boolean })[]; error?: string }
 const authError = 'Não foi possível autenticar a consulta de PRs. Autentique este remoto HTTPS pelo Git Credential Manager e tente novamente. A sessão do navegador ou uma chave SSH, sozinhas, não autenticam a API.';
 
@@ -131,6 +133,36 @@ export class AzurePullRequests {
       if (!matching.length) throw new Error(`PR ainda não encontrado: ${source} → ${target}. Conclua a criação no Azure e clique em “Buscar PRs e gerar mensagem”.`);
       if (matching.length > 1) throw new Error(`Há mais de um PR ativo de ${source} para ${target}. Revise os PRs no Azure antes de gerar a mensagem.`);
       results.push({ source, target, url: `${info.webUrl}/pullrequest/${matching[0].pullRequestId}` });
+    }
+    return results;
+  }
+  // Situação de merge de cada PR ativo (o Azure calcula em segundo plano: logo após criar, costuma vir "queued" = verificando).
+  async conflicts(repo: string, info: PullRequestInfo, input: { source: string; target: string }[]): Promise<PullRequestConflict[]> {
+    const pairs = prPairsSchema.parse(input);
+    if (!info.webUrl || !info.remote) throw new Error('O remoto deste repositório não é do Azure DevOps.');
+    const web = new URL(info.webUrl);
+    if (web.protocol !== 'https:') throw new Error('A consulta automática de PRs exige um remoto HTTPS.');
+    const marker = web.pathname.indexOf('/_git/');
+    const endpoint = `${web.origin}${web.pathname.slice(0, marker)}/_apis/git/repositories/${web.pathname.slice(marker + 6)}/pullrequests`;
+    const short = (value: string) => value.startsWith(`${info.remote}/`) ? value.slice(info.remote!.length + 1) : value;
+    const authorization = await this.authorization(repo, info.webUrl);
+    const schema = z.object({ value: z.array(z.object({ pullRequestId: z.number().int().positive(), sourceRefName: z.string(), targetRefName: z.string(), status: z.string(), mergeStatus: z.string().optional() })) });
+    const results: PullRequestConflict[] = [];
+    for (const pair of pairs.map(item => ({ source: short(item.source), target: short(item.target) }))) {
+      const url = new URL(endpoint);
+      url.search = new URLSearchParams({ 'api-version': '7.1', 'searchCriteria.sourceRefName': `refs/heads/${pair.source}`, 'searchCriteria.targetRefName': `refs/heads/${pair.target}`, 'searchCriteria.status': 'active', '$top': '2' }).toString();
+      let response: Response;
+      try { response = await this.request(url, { headers: { Authorization: authorization, Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(30000) }); }
+      catch { throw new Error('Não foi possível consultar o Azure DevOps. Verifique a conexão e tente novamente.'); }
+      if (response.status === 401 || response.status === 403 || response.status >= 300 && response.status < 400) throw new Error(authError);
+      if (!response.ok) throw new Error(`A consulta de PRs no Azure falhou (HTTP ${response.status}).`);
+      const parsed = schema.safeParse(await response.json().catch(() => null));
+      if (!parsed.success) throw new Error('O Azure não retornou uma lista de PRs válida.');
+      const pr = parsed.data.value.find(item => item.sourceRefName === `refs/heads/${pair.source}` && item.targetRefName === `refs/heads/${pair.target}` && item.status === 'active');
+      if (!pr) { results.push({ ...pair, state: 'none' }); continue; }
+      const merge = (pr.mergeStatus ?? '').toLowerCase();
+      const state: MergeState = merge === 'conflicts' ? 'conflicts' : merge === 'succeeded' ? 'ok' : merge === 'queued' || merge === 'notset' || !merge ? 'checking' : 'unknown';
+      results.push({ ...pair, state, url: `${info.webUrl}/pullrequest/${pr.pullRequestId}` });
     }
     return results;
   }

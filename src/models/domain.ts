@@ -31,6 +31,7 @@ export interface Api {
   jiraView(bounds: JiraBounds | null): Promise<void>;
   jiraState(): Promise<JiraBrowserState>;
   jiraOpen(): Promise<void>;
+  jiraRequestText(path: string): Promise<string>;
   jiraRequest(path: string, method?: JiraMethod, body?: unknown): Promise<unknown>;
   onJiraState(callback: (state: JiraBrowserState) => void): () => void;
   geminiView(bounds: GeminiBounds | null): Promise<void>;
@@ -74,6 +75,7 @@ export interface Api {
   createPullRequests(id: string, pairs: { source: string; target: string }[], issue: string): Promise<{ prs: { source: string; target: string; url: string; created: boolean }[]; error?: string; message?: ReviewMessage }>;
   updateReviewIssue(messageId: string, issue: string): Promise<ReviewMessage>;
   openReviewLink(url: string): Promise<void>;
+  pullRequestConflicts(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; state: 'conflicts' | 'ok' | 'checking' | 'unknown' | 'none'; url?: string }[]>;
   findPullRequests(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; url: string }[]>;
   saveReviewMessage(id: string, input: ReviewInput): Promise<ReviewMessage>;
   copyReviewMessage(messageId: string): Promise<void>;

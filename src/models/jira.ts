@@ -3,6 +3,8 @@ export const JIRA_HOME_URL = `${JIRA_BASE}/secure/Dashboard.jspa`;
 // Único endpoint fora de /rest/api/2/ que o app usa: é o que o Jira usa para marcar/desmarcar o impedimento (Flagged).
 export const JIRA_FLAG_PATH = '/rest/greenhopper/1.0/xboard/issue/flag/flag.json';
 export const isAllowedJiraPath = (path: string) => !path.includes('..') && (path.startsWith('/rest/api/2/') || path === JIRA_FLAG_PATH);
+// Exportação XML de uma issue (a mesma do menu Exportar → XML do Jira); só leitura.
+export const isAllowedJiraXmlPath = (path: string) => /^\/si\/jira\.issueviews:issue-xml\/[A-Za-z][A-Za-z0-9_]*-\d+\/[A-Za-z][A-Za-z0-9_]*-\d+\.xml$/.test(path);
 // Impedido = campo Flagged com a opção "Impediment" (aceita também o nome em português).
 export function isImpeded(issue: { fields: Record<string, unknown> }, flagFieldId: string | null | undefined) {
   if (!flagFieldId) return false;

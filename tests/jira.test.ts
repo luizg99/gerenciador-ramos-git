@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedJiraPath, isImpeded, JIRA_FLAG_PATH, parsePrLinks } from '../src/models/jira';
+import { isAllowedJiraPath, isAllowedJiraXmlPath, isImpeded, JIRA_FLAG_PATH, parsePrLinks } from '../src/models/jira';
 
 describe('links dos PRs colados no Jira', () => {
   it('extrai ramos e links sem repetir saudação, issue e títulos', () => {
@@ -27,5 +27,13 @@ describe('tarefa impedida (Flagged)', () => {
     expect(isAllowedJiraPath(JIRA_FLAG_PATH)).toBe(true);
     expect(isAllowedJiraPath('/rest/greenhopper/1.0/outro')).toBe(false);
     expect(isAllowedJiraPath('/rest/api/2/../admin')).toBe(false);
+  });
+});
+
+describe('exportação XML da issue', () => {
+  it('só aceita o caminho de XML de uma chave de issue', () => {
+    expect(isAllowedJiraXmlPath('/si/jira.issueviews:issue-xml/ABC-12/ABC-12.xml')).toBe(true);
+    expect(isAllowedJiraXmlPath('/si/jira.issueviews:issue-xml/ABC-12/../ABC-12.xml')).toBe(false);
+    expect(isAllowedJiraXmlPath('/secure/Other.jspa')).toBe(false);
   });
 });

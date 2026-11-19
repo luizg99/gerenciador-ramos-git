@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NO_SPRINT, buildHomeBoard, columnIdFor, countMine, filterBySprint, findMove, hasWithoutSprint, sprintOptions, type HomeColumn, type HomeIssue } from '../src/models/jiraHome';
+import { NO_SPRINT, buildHomeBoard, columnIdFor, countMine, filterBySprint, findMove, hasWithoutSprint, sprintJql, sprintOptions, summarizeSprint, type HomeColumn, type HomeIssue } from '../src/models/jiraHome';
 import type { SprintRef } from '../src/models/jiraReport';
 
 const status = (name: string, category: string) => ({ name, statusCategory: { key: category } });
@@ -107,5 +107,19 @@ describe('quadro da tela inicial', () => {
     expect(findMove(moves, column(board, 'Em teste de aceitação'))?.id).toBe('2');
     expect(findMove(moves, column(board, 'Finalizado'))?.id).toBe('3');
     expect(findMove(moves, column(board, 'Em revisão'))).toBeUndefined();
+  });
+});
+
+describe('progresso da sprint', () => {
+  const it2 = (name: string, subtask = false) => ({ fields: { status: { name }, issuetype: { name: 'Task', subtask } } });
+  it('conta só tarefas principais por coluna e calcula o % finalizado', () => {
+    const result = summarizeSprint([it2('Finalizado'), it2('A fazer'), it2('Em teste de aceitação'), it2('Finalizado'), it2('Finalizado', true)]);
+    expect(result.total).toBe(4);
+    expect(result.percent).toBe(50);
+    expect(result.counts.map(item => item.count)).toEqual([1, 0, 0, 0, 0, 1, 0, 2]);
+  });
+  it('sprint vazia dá 0% e o nome da sprint é escapado no JQL', () => {
+    expect(summarizeSprint([]).percent).toBe(0);
+    expect(sprintJql('Sprint "A"')).toContain('sprint = "Sprint \\"A\\""');
   });
 });

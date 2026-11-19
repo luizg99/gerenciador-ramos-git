@@ -1,6 +1,6 @@
 import { WebContentsView, type BrowserWindow } from 'electron';
 import { keepLoginsAcrossRestarts } from './persistentSession';
-import { isAllowedJiraPath, JIRA_BASE, JIRA_HOME_URL, type JiraBounds, type JiraBrowserState, type JiraMethod } from '../../src/models/jira';
+import { isAllowedJiraPath, isAllowedJiraXmlPath, JIRA_BASE, JIRA_HOME_URL, type JiraBounds, type JiraBrowserState, type JiraMethod } from '../../src/models/jira';
 
 export class JiraBrowser {
   private view?: WebContentsView;
@@ -95,6 +95,17 @@ export class JiraBrowser {
       `(async () => { if (location.origin !== ${JSON.stringify(JIRA_BASE)}) throw new Error('A sessão do Jira expirou.'); const response = await fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Atlassian-Token': 'no-check' }, ${body === undefined ? '' : `body: ${JSON.stringify(JSON.stringify(body))},`} }); const raw = await response.text(); if (!response.ok) throw new Error('Jira respondeu HTTP ' + response.status + ': ' + raw.slice(0, 500)); try { return raw ? JSON.parse(raw) : null; } catch { throw new Error('O Jira retornou uma resposta inesperada.'); } })()`
     }]);
     return result;
+  }
+  // Texto puro de uma página de exportação (XML da issue), com a sessão já logada.
+  async requestText(path: string): Promise<string> {
+    const contents = this.ensureView().webContents;
+    let url: URL;
+    try { url = new URL(contents.getURL()); } catch { throw new Error('A sessão do Jira ainda está carregando.'); }
+    if (url.origin !== JIRA_BASE || !isAllowedJiraXmlPath(path)) throw new Error('Conclua o login no Jira da equipe antes de carregar os dados.');
+    if (contents.isLoadingMainFrame()) throw new Error('Aguarde o Jira terminar de carregar.');
+    return await contents.executeJavaScriptInIsolatedWorld(999, [{ code:
+      `(async () => { if (location.origin !== ${JSON.stringify(JIRA_BASE)}) throw new Error('A sessão do Jira expirou.'); const response = await fetch(${JSON.stringify(path)}, { credentials: 'same-origin' }); const raw = await response.text(); if (!response.ok) throw new Error('Jira respondeu HTTP ' + response.status); if (response.redirected || !/^\\s*<(\\?xml|rss)/i.test(raw)) throw new Error('O Jira não devolveu o XML (a sessão pode ter expirado). Abra a aba Jira e entre de novo.'); if (raw.length > 5000000) throw new Error('O XML da issue é grande demais para copiar.'); return raw; })()`
+    }]) as string;
   }
   dispose() {
     if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.close();
