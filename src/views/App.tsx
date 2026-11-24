@@ -7,7 +7,7 @@ import { Gemini } from './Gemini';
 import { Jira } from './Jira';
 import { Home } from './Home';
 import { MyTasksPicker } from './MyTasksPicker';
-import { prBranchProblem, type PrBranchInfo } from '../models/prBranch';
+import { PR_DESCRIPTION_LIMIT, prBranchProblem, type PrBranchInfo } from '../models/prBranch';
 import { JIRA_BASE } from '../models/jira';
 import { JiraReport } from './JiraReport';
 import packageJson from '../../package.json';
@@ -276,6 +276,8 @@ function PullRequest({ c, vm }: Props) {
   const jiraInput = useRef<HTMLInputElement>(null);
   // Verifica os ramos (existem? têm commits que o destino não tem?) sempre que origem/destino mudam ou os ramos do remoto são atualizados.
   const [branchInfos, setBranchInfos] = useState<Record<string, PrBranchInfo>>({});
+  // Textos que o usuário editou (ou limpou) na descrição; o que não está aqui usa as mensagens dos commits.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const remoteName = vm.prInfo?.remote;
   const shortName = (value: string) => remoteName && value.startsWith(remoteName + '/') ? value.slice(remoteName.length + 1) : value;
   const wantedPairs = JSON.stringify((vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }]).map(row => [shortName(row.source.trim()), shortName(row.target.trim())]).filter(([source, target]) => source && target && source !== target).slice(0, 4));
@@ -288,7 +290,11 @@ function PullRequest({ c, vm }: Props) {
   }, [wantedPairs, vm.branches, vm.prInfo?.webUrl]);
   const create = () => {
     if (!vm.jiraIssue.trim() || vm.dynamicPr && skippedRows > 0) confirmationDialog.current?.showModal();
-    else void c.createPullRequests();
+    else void submit();
+  };
+  const submit = async () => {
+    await c.createPullRequests(drafts);
+    if (!c.getSnapshot().error) setDrafts({});
   };
   const info = vm.prInfo;
   if (!info) return <section className="card"><div className="empty small">Lendo o remoto do repositório…</div></section>;
@@ -308,6 +314,21 @@ function PullRequest({ c, vm }: Props) {
   const skippedRows = rows.filter(row => !row.source || !row.target).length;
   const activeCount = vm.dynamicPr ? readyRows.length : single.ready ? 1 : 0;
   const pairs = rows.map(r => `${r.source}→${r.target}`);
+  const textOf = (key: string) => drafts[key] ?? branchInfos[key]?.description ?? '';
+  const activeKeys = (vm.dynamicPr ? readyRows : single.ready ? [single] : []).map(row => `${row.source}→${row.target}`);
+  const overLimit = activeKeys.some(key => textOf(key).length > PR_DESCRIPTION_LIMIT);
+  const descriptionEditor = (row: { source: string; target: string }) => {
+    const key = `${row.source}→${row.target}`, text = textOf(key), edited = key in drafts, over = text.length > PR_DESCRIPTION_LIMIT;
+    return <div className="pr-description">
+      <div className="pr-description-head"><label htmlFor={`pr-desc-${key}`}>Descrição do PR <small>mensagens dos commits{vm.dynamicPr ? ` · ${row.source} → ${row.target}` : ''}</small></label><span className={`char-count ${over ? 'over' : ''}`} aria-live="polite">{text.length}/{PR_DESCRIPTION_LIMIT}</span></div>
+      <textarea id={`pr-desc-${key}`} rows={5} value={text} onChange={e => setDrafts(current => ({ ...current, [key]: e.target.value }))} placeholder="Sem texto: o PR será criado com a descrição vazia."/>
+      <div className="pr-description-actions">
+        <button type="button" className="quiet" disabled={!text} onClick={() => setDrafts(current => ({ ...current, [key]: '' }))}>Limpar texto</button>
+        <button type="button" className="quiet" disabled={!edited} onClick={() => setDrafts(current => { const next = { ...current }; delete next[key]; return next; })}>Preencher com os commits</button>
+      </div>
+      {over && <p className="row-error">A descrição passa do limite de {PR_DESCRIPTION_LIMIT} caracteres do Azure ({text.length - PR_DESCRIPTION_LIMIT} a mais). Apague parte do texto para criar o PR.</p>}
+    </div>;
+  };
   const rowsReady = readyRows.length > 0 && rows.every((r, i) => !r.source || !r.target || r.ready && pairs.indexOf(pairs[i]) === i);
   return <><section className="card switch-card">
     <dialog ref={confirmationDialog} className="issue-dialog" aria-labelledby="pr-confirm-title">
@@ -316,7 +337,7 @@ function PullRequest({ c, vm }: Props) {
       {vm.dynamicPr && skippedRows > 0 && <p>{skippedRows} {skippedRows === 1 ? 'linha está incompleta' : 'linhas estão incompletas'} e não {skippedRows === 1 ? 'terá' : 'terão'} PR criado. Somente os {readyRows.length} {readyRows.length === 1 ? 'par preenchido será enviado' : 'pares preenchidos serão enviados'}.</p>}
       <div className="card-actions">
         <button autoFocus onClick={() => { confirmationDialog.current?.close(); if (!vm.jiraIssue.trim()) jiraInput.current?.focus(); }}>Voltar</button>
-        <button className="primary" onClick={() => { confirmationDialog.current?.close(); void c.createPullRequests(); }}>Criar {activeCount} {activeCount === 1 ? 'PR' : 'PRs'}</button>
+        <button className="primary" onClick={() => { confirmationDialog.current?.close(); void submit(); }}>Criar {activeCount} {activeCount === 1 ? 'PR' : 'PRs'}</button>
       </div>
     </dialog>
     <div className="summary"><span>Azure Repos <strong>{info.webUrl.replace(/^https?:\/\//, '')}</strong></span></div>
@@ -330,18 +351,20 @@ function PullRequest({ c, vm }: Props) {
         <button className="icon danger visible" title="Remover linha" aria-label={`Remover pull request ${index + 1}`} onClick={() => c.removePrRow(index)}>×</button>
         {row.url && <p className="row-error">PR: <ReviewLink c={c} url={row.url}/></p>}
         {(rows[index].error || pairs.indexOf(pairs[index]) !== index && rows[index].ready) && <p className="row-error">{rows[index].error || 'Pull request repetido.'}</p>}
+        {rows[index].ready && descriptionEditor(rows[index])}
       </div>)}
       {vm.prRows.length < 4 && <button className="quiet add-row" onClick={c.addPrRow}>+ Adicionar pull request</button>}
     </div> : <>
       <div className="pr-fields"><BranchPicker label="Origem (seu ramo)" value={vm.prSource} branches={vm.branches} onChange={prSource => c.setSinglePr({ prSource })}/><span className="pr-arrow" aria-hidden="true">→</span><BranchPicker label="Destino" value={vm.prTarget} branches={vm.branches} onChange={prTarget => c.setSinglePr({ prTarget })}/></div>
       {single.source && !published(single.source) && <div className="create-branch"><p>{single.error || <>O ramo <code>{single.source}</code> ainda não está no remoto. Envie-o antes de abrir o pull request.</>}</p>{!single.canPush ? null : single.source === vm.status?.branch ? <button onClick={c.push}>↑ Enviar {single.source} para o remoto</button> : <p className="hint">Troque para esse ramo e use “Enviar”, ou escolha um ramo já publicado.</p>}</div>}
       {single.source && single.target && single.source === single.target && <p className="inline-warning">Origem e destino precisam ser diferentes.</p>}
+      {single.ready && descriptionEditor(single)}
     </>}
     <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
     {c.useJira && <MyTasksPicker disabled={vm.busy} onPick={key => c.set({ jiraIssue: `${JIRA_BASE}/browse/${key}` })}/>}
     <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição inclui as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages). O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
-      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
-        : <button className="primary" disabled={!single.ready} onClick={create}>Criar pull request no Azure</button>}</div>
+      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady || overLimit} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
+        : <button className="primary" disabled={!single.ready || overLimit} onClick={create}>Criar pull request no Azure</button>}</div>
   </section><PrConflicts c={c} vm={vm}/><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
 }
 function ReviewComposer({ c, vm }: Props) {

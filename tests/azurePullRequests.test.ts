@@ -43,6 +43,19 @@ describe('Consulta automática de PRs Azure', () => {
     expect(again.prs.every(pr => !pr.created)).toBe(true); expect(bodies).toHaveLength(3);
     expect(describe).toHaveBeenCalledTimes(3);
   });
+  it('usa o texto editado pelo usuário (inclusive vazio) no lugar das mensagens dos commits', async () => {
+    const bodies: any[] = [];
+    const request = vi.fn<typeof fetch>(async (_input, options) => {
+      if (options?.method !== 'POST') return Response.json({ value: [] });
+      const body = JSON.parse(String(options.body)); bodies.push(body);
+      return Response.json({ ...body, pullRequestId: bodies.length });
+    });
+    const describe = vi.fn(async () => '- Commit gerado');
+    const pairs = ['main', 'dev', 'release'].map(target => ({ source: 'feature', target }));
+    await new AzurePullRequests(async () => 'token', request).create('repo', info, pairs, describe, ['Texto curto', '', null]);
+    expect(bodies.map(body => body.description)).toEqual(['Texto curto', '', '- Commit gerado']);
+    expect(describe).toHaveBeenCalledTimes(1);
+  });
   it('preserva resultados parciais e interrompe o lote após falha', async () => {
     let writes = 0;
     const request = vi.fn<typeof fetch>(async (_input, options) => {

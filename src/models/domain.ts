@@ -77,7 +77,7 @@ export interface Api {
   pullRequestInfo(id: string): Promise<PullRequestInfo>;
   recentPushBranches(id: string): Promise<string[]>;
   reviewHistory(): Promise<ReviewMessage[]>;
-  createPullRequests(id: string, pairs: { source: string; target: string }[], issue: string): Promise<{ prs: { source: string; target: string; url: string; created: boolean }[]; error?: string; message?: ReviewMessage }>;
+  createPullRequests(id: string, pairs: { source: string; target: string }[], issue: string, descriptions: (string | null)[]): Promise<{ prs: { source: string; target: string; url: string; created: boolean }[]; error?: string; message?: ReviewMessage }>;
   updateReviewIssue(messageId: string, issue: string): Promise<ReviewMessage>;
   openReviewLink(url: string): Promise<void>;
   pullRequestConflicts(id: string, pairs: { source: string; target: string }[]): Promise<{ source: string; target: string; state: 'conflicts' | 'ok' | 'checking' | 'unknown' | 'none'; url?: string }[]>;

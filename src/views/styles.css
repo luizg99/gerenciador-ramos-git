@@ -1134,3 +1134,13 @@ nav button.push-pending.selected{box-shadow:inset 0 0 0 1.5px #d70015}
 .pr-conflicts-card .pr-conflict{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin:0;font-size:14px}
 .pr-conflicts-card .pr-conflict-badge{min-width:190px;margin:0}
 .pr-conflicts-card .pr-conflict-pair{color:var(--text)}
+
+/* Descrição editável do PR com contador de caracteres */
+.pr-description{grid-column:2/-1;display:grid;gap:6px;margin:4px 0 8px}
+.pr-fields + .pr-description,.create-branch + .pr-description,.inline-warning + .pr-description{grid-column:auto}
+.pr-description-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:13px}
+.pr-description-head small{margin-left:6px}
+.pr-description textarea{width:100%;min-height:96px;resize:vertical;font:12px/1.45 ui-monospace,Consolas,monospace;box-sizing:border-box}
+.pr-description-actions{display:flex;gap:8px;justify-content:flex-end}
+.char-count{font-variant-numeric:tabular-nums;font-size:12px;opacity:.8}
+.char-count.over{color:var(--red);font-weight:700;opacity:1}

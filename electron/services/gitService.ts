@@ -231,7 +231,8 @@ export class GitService {
       const [from, to] = await Promise.all([refOf(source), refOf(target)]);
       let ahead: number | null = null;
       if (from.state !== 'none' && to.state !== 'none') ahead = Number((await this.git(repo, ['rev-list', '--count', `${to.ref}..${from.ref}`, '--']).catch(() => '')).trim()) || 0;
-      return { source, target, sourceState: from.state, targetState: to.state, ahead };
+      const description = from.state === 'remote' && to.state === 'remote' && ahead ? await this.pullRequestCommitMessages(repo, remote, source, target).catch(() => '') : '';
+      return { source, target, sourceState: from.state, targetState: to.state, ahead, description };
     }));
   }
   // Valida todos os pares antes de devolver qualquer link: ou abre todos, ou nenhum.

@@ -370,12 +370,14 @@ export class AppController {
       } catch { if (run === this.conflictRun) this.set({ prConflicts: this.state.prConflicts.map(item => ({ ...item, state: 'unknown' as const })) }); return; }
     }
   };
-  createPullRequests = () => this.action(async () => {
+  createPullRequests = (descriptions: Record<string, string> = {}) => this.action(async () => {
     parseJiraIssue(this.state.jiraIssue);
     const pairs = (this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }]).filter(row => row.source.trim() && row.target.trim());
     if (!pairs.length) throw new Error('Preencha ao menos uma origem e um destino para criar PR.');
     this.conflictRun++;
-    const result = await this.api.createPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })), this.state.jiraIssue);
+    const remoteName = this.state.prInfo?.remote;
+    const bare = (value: string) => remoteName && value.trim().startsWith(remoteName + '/') ? value.trim().slice(remoteName.length + 1) : value.trim();
+    const result = await this.api.createPullRequests(this.id, pairs.map(({ source, target }) => ({ source: source.trim(), target: target.trim() })), this.state.jiraIssue, pairs.map(({ source, target }) => descriptions[`${bare(source)}→${bare(target)}`] ?? null));
     this.set({ generatedReview: result.message, prConflicts: result.prs.map(pr => ({ ...pr, state: 'checking' as const })) });
     if (result.prs.length) void this.checkConflicts(8);
     const remote = this.state.prInfo?.remote;

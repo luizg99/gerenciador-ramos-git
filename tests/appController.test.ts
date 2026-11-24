@@ -31,7 +31,7 @@ describe('AppController', () => {
     c.setRememberPrDestinations(true);
     expect(updateSettings).toHaveBeenCalledWith({ ui: { rememberPrDestinations: true } });
     await c.createPullRequests();
-    expect(createPullRequests).toHaveBeenCalledWith(a.id, [{ source: 'feature', target: 'main' }], '');
+    expect(createPullRequests).toHaveBeenCalledWith(a.id, [{ source: 'feature', target: 'main' }], '', [null]);
     expect(c.getSnapshot().prRows.map(row => row.target)).toEqual(['main', '', '', '']);
     expect(c.getSnapshot().snapshot.settings.ui?.prDestinations).toEqual(['main']);
     expect(updateSettings).toHaveBeenLastCalledWith({ ui: { prDestinations: ['main'] } });

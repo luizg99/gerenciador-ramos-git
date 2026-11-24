@@ -125,12 +125,12 @@ function registerIpc() {
   handle('reviews:history', z.tuple([]), () => controller.reviews.history());
   handle('reviews:updateIssue', z.tuple([z.string().uuid(), z.string().max(4096)]), (messageId, issue) => controller.exclusive(() => controller.reviews.updateIssue(messageId, issue)));
   handle('reviews:openLink', z.tuple([z.string().max(8192).url().refine(value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password; } catch { return false; } })]), url => shell.openExternal(url));
-  handle('git:createPullRequests', z.tuple([id, prPairsSchema, z.string().max(4096)]), (id, pairs, issue) => controller.mutate(id, async repo => {
+  handle('git:createPullRequests', z.tuple([id, prPairsSchema, z.string().max(4096), z.array(z.string().max(4000).nullable()).max(4)]), (id, pairs, issue, descriptions) => controller.mutate(id, async repo => {
     parseJiraIssue(issue);
     await controller.git.branches(repo, true);
     await controller.git.pullRequestUrls(repo, pairs);
     const info = await controller.git.pullRequestInfo(repo);
-    const result = await new AzurePullRequests().create(repo, info, pairs, (source, target) => controller.git.pullRequestCommitMessages(repo, info.remote!, source, target));
+    const result = await new AzurePullRequests().create(repo, info, pairs, (source, target) => controller.git.pullRequestCommitMessages(repo, info.remote!, source, target), descriptions);
     let message;
     if (result.prs.length) try { message = await controller.reviews.save(repo, { issue, prs: result.prs }); }
     catch { result.error = [result.error, 'Os PRs foram obtidos, mas não foi possível salvar o histórico. Os links continuam disponíveis nesta tela.'].filter(Boolean).join('\n'); }

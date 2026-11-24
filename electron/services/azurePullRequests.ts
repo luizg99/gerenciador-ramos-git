@@ -57,7 +57,7 @@ export class AzurePullRequests {
     }
     return [...latest].sort((a, b) => b[1] - a[1]).slice(0, 4).reverse().map(([name]) => name);
   }
-  async create(repo: string, info: PullRequestInfo, input: { source: string; target: string }[], describe: (source: string, target: string) => Promise<string>): Promise<CreatedPullRequests> {
+  async create(repo: string, info: PullRequestInfo, input: { source: string; target: string }[], describe: (source: string, target: string) => Promise<string>, overrides: (string | null)[] = []): Promise<CreatedPullRequests> {
     const pairs = prPairsSchema.parse(input);
     if (!info.webUrl || !info.remote) throw new Error('O remoto deste repositório não é do Azure DevOps.');
     const web = new URL(info.webUrl);
@@ -78,7 +78,7 @@ export class AzurePullRequests {
     };
     // Prepare all descriptions before the first write; each range uses the fetched remote branches.
     const prepared = [];
-    for (const pair of normalized) {
+    for (const [index, pair] of normalized.entries()) {
       const query = new URL(endpoint);
       query.search = new URLSearchParams({ 'api-version': '7.1', 'searchCriteria.sourceRefName': `refs/heads/${pair.source}`, 'searchCriteria.targetRefName': `refs/heads/${pair.target}`, 'searchCriteria.status': 'active', '$top': '2' }).toString();
       const parsed = responseSchema.safeParse(await call(query));
@@ -86,9 +86,11 @@ export class AzurePullRequests {
       const matches = parsed.data.value.filter(pr => pr.sourceRefName === `refs/heads/${pair.source}` && pr.targetRefName === `refs/heads/${pair.target}` && pr.status === 'active');
       if (matches.length > 1) throw new Error(`Há mais de um PR ativo para ${pair.source} → ${pair.target}. Revise no Azure.`);
       const existing = matches[0];
-      const description = existing ? '' : await describe(pair.source, pair.target);
-      if (!existing && !description.trim()) throw new Error(`Não há commits para criar o PR ${pair.source} → ${pair.target}.`);
-      if (description.length > 4000) throw new Error(`As mensagens dos commits de ${pair.source} → ${pair.target} excedem o limite de 4.000 caracteres da descrição do Azure.`);
+      // Texto editado pelo usuário (inclusive vazio) vale no lugar das mensagens dos commits.
+      const custom = overrides[index] ?? null;
+      const description = existing ? '' : custom ?? await describe(pair.source, pair.target);
+      if (!existing && custom === null && !description.trim()) throw new Error(`Não há commits para criar o PR ${pair.source} → ${pair.target}.`);
+      if (description.length > 4000) throw new Error(`As mensagens dos commits de ${pair.source} → ${pair.target} excedem o limite de 4.000 caracteres da descrição do Azure. Reduza o texto na tela antes de criar.`);
       prepared.push({ ...pair, existing, description });
     }
     const result: CreatedPullRequests = { prs: [] };
