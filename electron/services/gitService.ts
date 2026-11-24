@@ -231,7 +231,8 @@ export class GitService {
       const [from, to] = await Promise.all([refOf(source), refOf(target)]);
       let ahead: number | null = null;
       if (from.state !== 'none' && to.state !== 'none') ahead = Number((await this.git(repo, ['rev-list', '--count', `${to.ref}..${from.ref}`, '--']).catch(() => '')).trim()) || 0;
-      const description = from.state === 'remote' && to.state === 'remote' && ahead ? await this.pullRequestCommitMessages(repo, remote, source, target).catch(() => '') : '';
+      // undefined = não foi possível ler o texto (a tela então deixa o servidor gerar na hora de criar).
+      const description = from.state === 'remote' && to.state === 'remote' && ahead ? await this.pullRequestCommitMessages(repo, remote, source, target).catch(() => undefined) : undefined;
       return { source, target, sourceState: from.state, targetState: to.state, ahead, description };
     }));
   }

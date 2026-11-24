@@ -59,6 +59,7 @@ export class AzurePullRequests {
   }
   async create(repo: string, info: PullRequestInfo, input: { source: string; target: string }[], describe: (source: string, target: string) => Promise<string>, overrides: (string | null)[] = []): Promise<CreatedPullRequests> {
     const pairs = prPairsSchema.parse(input);
+    if (overrides.length > pairs.length) throw new Error('Textos de descrição demais para a quantidade de PRs.');
     if (!info.webUrl || !info.remote) throw new Error('O remoto deste repositório não é do Azure DevOps.');
     const web = new URL(info.webUrl);
     if (web.protocol !== 'https:') throw new Error('A criação automática exige um remoto HTTPS.');
@@ -90,7 +91,7 @@ export class AzurePullRequests {
       const custom = overrides[index] ?? null;
       const description = existing ? '' : custom ?? await describe(pair.source, pair.target);
       if (!existing && custom === null && !description.trim()) throw new Error(`Não há commits para criar o PR ${pair.source} → ${pair.target}.`);
-      if (description.length > 4000) throw new Error(`As mensagens dos commits de ${pair.source} → ${pair.target} excedem o limite de 4.000 caracteres da descrição do Azure. Reduza o texto na tela antes de criar.`);
+      if (description.length > 4000) throw new Error(custom !== null ? `A descrição de ${pair.source} → ${pair.target} passa do limite de 4.000 caracteres do Azure. Reduza o texto na tela antes de criar.` : `As mensagens dos commits de ${pair.source} → ${pair.target} excedem o limite de 4.000 caracteres da descrição do Azure. Edite o texto na tela e tente de novo.`);
       prepared.push({ ...pair, existing, description });
     }
     const result: CreatedPullRequests = { prs: [] };

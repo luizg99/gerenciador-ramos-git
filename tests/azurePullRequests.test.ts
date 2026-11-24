@@ -56,6 +56,15 @@ describe('Consulta automática de PRs Azure', () => {
     expect(bodies.map(body => body.description)).toEqual(['Texto curto', '', '- Commit gerado']);
     expect(describe).toHaveBeenCalledTimes(1);
   });
+  it('recusa descrição acima de 4.000 caracteres antes de criar e textos de sobra', async () => {
+    const request = vi.fn<typeof fetch>(async () => Response.json({ value: [] }));
+    const service = new AzurePullRequests(async () => 'token', request);
+    const pair = [{ source: 'feature', target: 'main' }];
+    await expect(service.create('repo', info, pair, async () => 'x', ['y'.repeat(4001)])).rejects.toThrow('A descrição de feature → main passa do limite');
+    await expect(service.create('repo', info, pair, async () => 'x'.repeat(4001))).rejects.toThrow('As mensagens dos commits');
+    await expect(service.create('repo', info, pair, async () => 'x', ['a', 'b'])).rejects.toThrow('Textos de descrição demais');
+    expect(request.mock.calls.every(([, options]) => options?.method !== 'POST')).toBe(true);
+  });
   it('preserva resultados parciais e interrompe o lote após falha', async () => {
     let writes = 0;
     const request = vi.fn<typeof fetch>(async (_input, options) => {

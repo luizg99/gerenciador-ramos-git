@@ -370,7 +370,10 @@ export class AppController {
       } catch { if (run === this.conflictRun) this.set({ prConflicts: this.state.prConflicts.map(item => ({ ...item, state: 'unknown' as const })) }); return; }
     }
   };
-  createPullRequests = (descriptions: Record<string, string> = {}) => this.action(async () => {
+  // Devolve true só quando os PRs foram realmente criados/reaproveitados sem erro (a tela usa isso para descartar os textos editados).
+  createPullRequests = async (descriptions: Record<string, string> = {}) => {
+    let succeeded = false;
+    await this.action(async () => {
     parseJiraIssue(this.state.jiraIssue);
     const pairs = (this.state.dynamicPr ? this.state.prRows : [{ source: this.state.prSource, target: this.state.prTarget }]).filter(row => row.source.trim() && row.target.trim());
     if (!pairs.length) throw new Error('Preencha ao menos uma origem e um destino para criar PR.');
@@ -385,15 +388,18 @@ export class AppController {
     const urlFor = (row: PrRow) => result.prs.find(pr => pr.source === short(row.source) && pr.target === short(row.target))?.url;
     if (this.state.dynamicPr) this.set({ prRows: this.state.prRows.map(row => ({ ...row, url: urlFor(row) })) });
     else this.set({ prUrl: urlFor(pairs[0]) ?? '' });
+    succeeded = !result.error;
     if (!result.error) {
       const destinations = this.state.rememberPrDestinations ? pairs.map(row => row.target.trim()) : [];
       if (this.state.rememberPrDestinations) this.storePrDestinations(destinations);
       this.prSourcesVersion++;
       this.set({ jiraIssue: '', prSource: '', prTarget: destinations[0] ?? '', prUrl: '', prRows: emptyPrRows(destinations) });
     }
-    this.set({ error: result.error ?? '', notice: `${result.prs.filter(pr => pr.created).length} PR(s) criado(s), ${result.prs.filter(pr => !pr.created).length} já existente(s).${result.error ? ' Os resultados concluídos foram preservados; tente novamente para continuar.' : ' Descrições preenchidas com as mensagens dos commits. Mensagem para revisão pronta para copiar.'}` });
+    this.set({ error: result.error ?? '', notice: `${result.prs.filter(pr => pr.created).length} PR(s) criado(s), ${result.prs.filter(pr => !pr.created).length} já existente(s).${result.error ? ' Os resultados concluídos foram preservados; tente novamente para continuar.' : ' Descrições enviadas conforme o texto mostrado na tela. Mensagem para revisão pronta para copiar.'}` });
     this.set({ reviewMessages: await this.api.reviewHistory() });
-  }, false, 'Criando PRs com as mensagens dos commits…');
+    }, false, 'Criando PRs…');
+    return succeeded;
+  };
   runPman = () => this.action(async () => { await this.api.runPman(this.id); this.set({ notice: 'Dependências instaladas.' }); }, true);
   // Não trava a tela: ao entrar na aba Histórico o menu continua clicável enquanto o Git lê os commits.
   private historyToken = 0;

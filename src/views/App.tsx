@@ -278,6 +278,9 @@ function PullRequest({ c, vm }: Props) {
   const [branchInfos, setBranchInfos] = useState<Record<string, PrBranchInfo>>({});
   // Textos que o usuário editou (ou limpou) na descrição; o que não está aqui usa as mensagens dos commits.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Os textos editados pertencem ao projeto em que foram escritos.
+  const projectId = (() => { try { return c.id; } catch { return ''; } })();
+  useEffect(() => setDrafts({}), [projectId]);
   const remoteName = vm.prInfo?.remote;
   const shortName = (value: string) => remoteName && value.startsWith(remoteName + '/') ? value.slice(remoteName.length + 1) : value;
   const wantedPairs = JSON.stringify((vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }]).map(row => [shortName(row.source.trim()), shortName(row.target.trim())]).filter(([source, target]) => source && target && source !== target).slice(0, 4));
@@ -293,8 +296,9 @@ function PullRequest({ c, vm }: Props) {
     else void submit();
   };
   const submit = async () => {
-    await c.createPullRequests(drafts);
-    if (!c.getSnapshot().error) setDrafts({});
+    // Envia exatamente o texto mostrado; sem texto lido (falha na leitura) o servidor gera na hora.
+    const texts = Object.fromEntries(activeKeys.flatMap(key => { const text = textOf(key); return key in drafts || branchInfos[key]?.description !== undefined ? [[key, text]] : []; }));
+    if (await c.createPullRequests(texts)) setDrafts({});
   };
   const info = vm.prInfo;
   if (!info) return <section className="card"><div className="empty small">Lendo o remoto do repositório…</div></section>;
@@ -316,17 +320,16 @@ function PullRequest({ c, vm }: Props) {
   const pairs = rows.map(r => `${r.source}→${r.target}`);
   const textOf = (key: string) => drafts[key] ?? branchInfos[key]?.description ?? '';
   const activeKeys = (vm.dynamicPr ? readyRows : single.ready ? [single] : []).map(row => `${row.source}→${row.target}`);
-  const overLimit = activeKeys.some(key => textOf(key).length > PR_DESCRIPTION_LIMIT);
   const descriptionEditor = (row: { source: string; target: string }) => {
-    const key = `${row.source}→${row.target}`, text = textOf(key), edited = key in drafts, over = text.length > PR_DESCRIPTION_LIMIT;
+    const key = `${row.source}→${row.target}`, text = textOf(key), edited = key in drafts, unread = !edited && branchInfos[key]?.description === undefined, over = text.length > PR_DESCRIPTION_LIMIT;
     return <div className="pr-description">
       <div className="pr-description-head"><label htmlFor={`pr-desc-${key}`}>Descrição do PR <small>mensagens dos commits{vm.dynamicPr ? ` · ${row.source} → ${row.target}` : ''}</small></label><span className={`char-count ${over ? 'over' : ''}`} aria-live="polite">{text.length}/{PR_DESCRIPTION_LIMIT}</span></div>
-      <textarea id={`pr-desc-${key}`} rows={5} value={text} onChange={e => setDrafts(current => ({ ...current, [key]: e.target.value }))} placeholder="Sem texto: o PR será criado com a descrição vazia."/>
+      <textarea id={`pr-desc-${key}`} rows={5} value={text} onChange={e => setDrafts(current => ({ ...current, [key]: e.target.value }))} placeholder={unread ? 'Não foi possível ler as mensagens dos commits agora; elas serão usadas na hora de criar o PR.' : 'Sem texto: o PR será criado com a descrição vazia.'}/>
       <div className="pr-description-actions">
         <button type="button" className="quiet" disabled={!text} onClick={() => setDrafts(current => ({ ...current, [key]: '' }))}>Limpar texto</button>
         <button type="button" className="quiet" disabled={!edited} onClick={() => setDrafts(current => { const next = { ...current }; delete next[key]; return next; })}>Preencher com os commits</button>
       </div>
-      {over && <p className="row-error">A descrição passa do limite de {PR_DESCRIPTION_LIMIT} caracteres do Azure ({text.length - PR_DESCRIPTION_LIMIT} a mais). Apague parte do texto para criar o PR.</p>}
+      {over && <p className="row-error">A descrição passa do limite de {PR_DESCRIPTION_LIMIT} caracteres do Azure ({text.length - PR_DESCRIPTION_LIMIT} a mais). Reduza o texto: o Azure recusa a criação de um PR novo acima disso (um PR ativo já existente é só reaproveitado).</p>}
     </div>;
   };
   const rowsReady = readyRows.length > 0 && rows.every((r, i) => !r.source || !r.target || r.ready && pairs.indexOf(pairs[i]) === i);
@@ -362,9 +365,9 @@ function PullRequest({ c, vm }: Props) {
     </>}
     <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
     {c.useJira && <MyTasksPicker disabled={vm.busy} onPick={key => c.set({ jiraIssue: `${JIRA_BASE}/browse/${key}` })}/>}
-    <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição inclui as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages). O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
-      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady || overLimit} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
-        : <button className="primary" disabled={!single.ready || overLimit} onClick={create}>Criar pull request no Azure</button>}</div>
+    <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição vem preenchida com as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages) e pode ser editada ou limpa antes de criar. O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
+      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
+        : <button className="primary" disabled={!single.ready} onClick={create}>Criar pull request no Azure</button>}</div>
   </section><PrConflicts c={c} vm={vm}/><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
 }
 function ReviewComposer({ c, vm }: Props) {
