@@ -3,7 +3,7 @@
 import { app, net, safeStorage } from 'electron';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { JIRA_BASE, isAllowedImpedimentPath, isAllowedJiraPath, isAllowedJiraXmlPath } from '../../src/models/jira';
+import { JIRA_BASE, isAllowedImpedimentPath, isAllowedJiraPath, isAllowedJiraXmlPath, looksLikeJiraXml } from '../../src/models/jira';
 import type { JiraMethod } from '../../src/models/jira';
 import { IMPEDIMENT_PAGE, impedimentFormBody, isLoginRedirect } from '../../src/models/jiraImpediment';
 
@@ -48,7 +48,7 @@ export async function jiraTokenRequest(token: string, requestPath: string, metho
   const raw = await response.text();
   if (!response.ok) throw new Error(`Jira respondeu HTTP ${response.status}: ${raw.slice(0, 500)}`);
   if (asText) {
-    if (!/^\s*<(\?xml|rss)/i.test(raw)) throw new Error('O Jira não devolveu o XML da issue.');
+    if (!looksLikeJiraXml(raw)) throw new Error('O Jira não devolveu o XML da issue.');
     if (raw.length > 5000000) throw new Error('O XML da issue é grande demais para copiar.');
     return raw;
   }

@@ -152,7 +152,7 @@ export class JiraBrowser {
     if (url.origin !== JIRA_BASE || !isAllowedJiraXmlPath(path)) throw new Error('Conclua o login no Jira da equipe antes de carregar os dados.');
     if (contents.isLoadingMainFrame()) throw new Error('Aguarde o Jira terminar de carregar.');
     return await contents.executeJavaScriptInIsolatedWorld(999, [{ code:
-      `(async () => { if (location.origin !== ${JSON.stringify(JIRA_BASE)}) throw new Error('A sessão do Jira expirou.'); const response = await fetch(${JSON.stringify(path)}, { credentials: 'same-origin' }); const raw = await response.text(); if (!response.ok) throw new Error('Jira respondeu HTTP ' + response.status); if (response.redirected || !/^\\s*<(\\?xml|rss)/i.test(raw)) throw new Error('O Jira não devolveu o XML (a sessão pode ter expirado). Abra a aba Jira e entre de novo.'); if (raw.length > 5000000) throw new Error('O XML da issue é grande demais para copiar.'); return raw; })()`
+      `(async () => { if (location.origin !== ${JSON.stringify(JIRA_BASE)}) throw new Error('A sessão do Jira expirou.'); const response = await fetch(${JSON.stringify(path)}, { credentials: 'same-origin' }); const raw = await response.text(); if (!response.ok) throw new Error('Jira respondeu HTTP ' + response.status); if (response.redirected || !/^\\s*(?:<!--[\\s\\S]*?-->\\s*)*<(?:\\?xml|rss)[\\s>?]/i.test(raw)) throw new Error('O Jira não devolveu o XML (a sessão pode ter expirado). Abra a aba Jira e entre de novo.'); if (raw.length > 5000000) throw new Error('O XML da issue é grande demais para copiar.'); return raw; })()`
     }]) as string;
   }
   dispose() {
