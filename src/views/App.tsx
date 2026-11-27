@@ -278,6 +278,8 @@ function PullRequest({ c, vm }: Props) {
   const [branchInfos, setBranchInfos] = useState<Record<string, PrBranchInfo>>({});
   // Textos que o usuário editou (ou limpou) na descrição; o que não está aqui usa as mensagens dos commits.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Quais pares já tiveram as mensagens dos commits lidas (ou desistiu); enquanto diferir do que está na tela, está "Processando commits".
+  const [loadedFor, setLoadedFor] = useState('');
   // Os textos editados pertencem ao projeto em que foram escritos.
   const projectId = (() => { try { return c.id; } catch { return ''; } })();
   useEffect(() => setDrafts({}), [projectId]);
@@ -286,14 +288,14 @@ function PullRequest({ c, vm }: Props) {
   const wantedPairs = JSON.stringify((vm.dynamicPr ? vm.prRows : [{ source: vm.prSource, target: vm.prTarget }]).map(row => [shortName(row.source.trim()), shortName(row.target.trim())]).filter(([source, target]) => source && target && source !== target).slice(0, 4));
   useEffect(() => {
     const pairs = (JSON.parse(wantedPairs) as string[][]).map(([source, target]) => ({ source, target }));
-    if (!pairs.length || !vm.prInfo?.webUrl) { setBranchInfos({}); return; }
+    if (!pairs.length || !vm.prInfo?.webUrl) { setBranchInfos({}); setLoadedFor(wantedPairs); return; }
     let alive = true, timer: ReturnType<typeof setTimeout>;
     // Se outra operação (ex.: busca no remoto ao abrir o projeto) estiver em andamento, o servidor recusa a leitura; tenta de novo logo em seguida.
     const load = (delay: number, attempt: number) => {
       timer = setTimeout(() => {
         try {
-          void window.gitManager.prBranchInfo(c.id, pairs).then(found => { if (alive) setBranchInfos(Object.fromEntries(found.map(item => [`${item.source}→${item.target}`, item]))); })
-            .catch(() => { if (!alive) return; if (attempt < 60) load(1000, attempt + 1); else setBranchInfos({}); });
+          void window.gitManager.prBranchInfo(c.id, pairs).then(found => { if (alive) { setBranchInfos(Object.fromEntries(found.map(item => [`${item.source}→${item.target}`, item]))); setLoadedFor(wantedPairs); } })
+            .catch(() => { if (!alive) return; if (attempt < 60) load(1000, attempt + 1); else { setBranchInfos({}); setLoadedFor(wantedPairs); } });
         } catch { /* sem projeto selecionado */ }
       }, delay);
     };
@@ -301,10 +303,12 @@ function PullRequest({ c, vm }: Props) {
     return () => { alive = false; clearTimeout(timer); };
   }, [wantedPairs, vm.branches, vm.prInfo?.webUrl]);
   const create = () => {
+    if (checking) return;
     if (!vm.jiraIssue.trim() || vm.dynamicPr && skippedRows > 0) confirmationDialog.current?.showModal();
     else void submit();
   };
   const submit = async () => {
+    if (checking) return;
     // Envia exatamente o texto mostrado; sem texto lido (falha na leitura) o servidor gera na hora.
     const texts = Object.fromEntries(activeKeys.flatMap(key => { const text = textOf(key); return key in drafts || branchInfos[key]?.description !== undefined ? [[key, text]] : []; }));
     if (await c.createPullRequests(texts)) setDrafts({});
@@ -328,12 +332,15 @@ function PullRequest({ c, vm }: Props) {
   const activeCount = vm.dynamicPr ? readyRows.length : single.ready ? 1 : 0;
   const pairs = rows.map(r => `${r.source}→${r.target}`);
   const textOf = (key: string) => drafts[key] ?? branchInfos[key]?.description ?? '';
+  // Lendo as mensagens dos commits: criar PR fica bloqueado até terminar.
+  const checking = !!info.webUrl && JSON.parse(wantedPairs).length > 0 && loadedFor !== wantedPairs;
   const activeKeys = (vm.dynamicPr ? readyRows : single.ready ? [single] : []).map(row => `${row.source}→${row.target}`);
   const descriptionEditor = (row: { source: string; target: string }) => {
     const key = `${row.source}→${row.target}`, text = textOf(key), edited = key in drafts, unread = !edited && branchInfos[key]?.description === undefined, over = text.length > PR_DESCRIPTION_LIMIT;
-    return <div className="pr-description">
+    return <div className="pr-description" aria-busy={checking}>
       <div className="pr-description-head"><label htmlFor={`pr-desc-${key}`}>Descrição do PR <small>mensagens dos commits{vm.dynamicPr ? ` · ${row.source} → ${row.target}` : ''}</small></label><span className={`char-count ${over ? 'over' : ''}`} aria-live="polite">{text.length}/{PR_DESCRIPTION_LIMIT}</span></div>
-      <textarea id={`pr-desc-${key}`} rows={5} value={text} onChange={e => setDrafts(current => ({ ...current, [key]: e.target.value }))} placeholder={unread ? 'Não foi possível ler as mensagens dos commits agora; elas serão usadas na hora de criar o PR.' : 'Sem texto: o PR será criado com a descrição vazia.'}/>
+      {checking && <p className="pr-processing" role="status"><span className="spinner" aria-hidden="true"/>Processando commits…</p>}
+      <textarea id={`pr-desc-${key}`} rows={5} disabled={checking} value={text} onChange={e => setDrafts(current => ({ ...current, [key]: e.target.value }))} placeholder={unread ? 'Não foi possível ler as mensagens dos commits agora; elas serão usadas na hora de criar o PR.' : 'Sem texto: o PR será criado com a descrição vazia.'}/>
       <div className="pr-description-actions">
         <button type="button" className="quiet" disabled={!text} onClick={() => setDrafts(current => ({ ...current, [key]: '' }))}>Limpar texto</button>
         <button type="button" className="quiet" disabled={!edited} onClick={() => setDrafts(current => { const next = { ...current }; delete next[key]; return next; })}>Preencher com os commits</button>
@@ -375,8 +382,8 @@ function PullRequest({ c, vm }: Props) {
     <label className="field jira-issue">Issue Jira <small>opcional</small><input ref={jiraInput} value={vm.jiraIssue} onChange={e => c.set({ jiraIssue: e.target.value })} placeholder="DDVENDAS-61611 ou link completo do Jira"/></label>
     {c.useJira && <MyTasksPicker disabled={vm.busy} onPick={key => c.set({ jiraIssue: `${JIRA_BASE}/browse/${key}` })}/>}
     <div className="card-actions"><p className="hint">Cria os PRs diretamente no Azure. A descrição vem preenchida com as mensagens completas dos commits de cada origem que ainda não estão no destino (Add commit messages) e pode ser editada ou limpa antes de criar. O título usa origem → destino. PRs ativos já existentes são reutilizados.</p>
-      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady} onClick={create}>{`Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
-        : <button className="primary" disabled={!single.ready} onClick={create}>Criar pull request no Azure</button>}</div>
+      {vm.dynamicPr ? <button className="primary" disabled={!rowsReady || checking} onClick={create}>{checking ? 'Processando commits…' : `Criar ${readyRows.length} ${readyRows.length === 1 ? 'pull request' : 'pull requests'} no Azure`}</button>
+        : <button className="primary" disabled={!single.ready || checking} onClick={create}>{checking ? 'Processando commits…' : 'Criar pull request no Azure'}</button>}</div>
   </section><PrConflicts c={c} vm={vm}/><ReviewComposer c={c} vm={vm}/><ReviewHistory c={c} vm={vm}/></>;
 }
 function ReviewComposer({ c, vm }: Props) {
