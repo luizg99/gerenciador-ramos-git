@@ -287,8 +287,17 @@ function PullRequest({ c, vm }: Props) {
   useEffect(() => {
     const pairs = (JSON.parse(wantedPairs) as string[][]).map(([source, target]) => ({ source, target }));
     if (!pairs.length || !vm.prInfo?.webUrl) { setBranchInfos({}); return; }
-    let alive = true;
-    const timer = setTimeout(() => { try { void window.gitManager.prBranchInfo(c.id, pairs).then(found => { if (alive) setBranchInfos(Object.fromEntries(found.map(item => [`${item.source}→${item.target}`, item]))); }).catch(() => { if (alive) setBranchInfos({}); }); } catch { /* sem projeto selecionado */ } }, 350);
+    let alive = true, timer: ReturnType<typeof setTimeout>;
+    // Se outra operação (ex.: busca no remoto ao abrir o projeto) estiver em andamento, o servidor recusa a leitura; tenta de novo logo em seguida.
+    const load = (delay: number, attempt: number) => {
+      timer = setTimeout(() => {
+        try {
+          void window.gitManager.prBranchInfo(c.id, pairs).then(found => { if (alive) setBranchInfos(Object.fromEntries(found.map(item => [`${item.source}→${item.target}`, item]))); })
+            .catch(() => { if (!alive) return; if (attempt < 60) load(1000, attempt + 1); else setBranchInfos({}); });
+        } catch { /* sem projeto selecionado */ }
+      }, delay);
+    };
+    load(350, 0);
     return () => { alive = false; clearTimeout(timer); };
   }, [wantedPairs, vm.branches, vm.prInfo?.webUrl]);
   const create = () => {
